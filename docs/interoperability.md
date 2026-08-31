@@ -25,11 +25,10 @@ consumer may legitimately point them at different endpoints, since a completion 
 always serve embeddings.
 
 A consumer wiring both together does so in its own code: retrieve from ai-memory, put the result in a
-prompt variable, call this library.
+prompt variable, call this library. Because both are synchronous by contract, all of it fits in one
+`deferToThread` — see [stages.md](stages.md) for the shape.
 
-`[TBD — needs discussion: stage two makes this a hard dependency, with retrieval happening inside this
-library and filling a reserved `{memory}` placeholder. See stages.md. Until that lands the two are
-independent.]`
+Keeping them independent is the working position, not an accident of sequencing.
 
 ## evennia-archive
 

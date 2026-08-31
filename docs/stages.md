@@ -61,16 +61,32 @@ Decided in conversation and recorded so the reasoning survives. None of it is bu
   default, run over the whole directory at startup. It logs and names the file and the offending
   placeholders; it does not stop the boot, because a bad prompt has a fallback by design. The cache
   flush command re-runs it.
-- **Memory integration.** The library takes `evennia-ai-memory` as a hard dependency, does the
-  retrieval itself inside the same thread hop as the completion, and fills a reserved `{memory}`
-  placeholder that the consumer never supplies. Retrieval happens only when the caller passes the
-  arguments that need it, and a per-object attribute overrides a settings default. Every ai-memory
-  import sits behind a single seam module.
-- **The library does not wire ai-memory up.** ai-memory is independently installable and documents its
-  own `INSTALLED_APPS` line. This library detects and errors at boot if it is missing or unmigrated,
-  naming what to add — and checks nothing about ai-memory's alias or router, which ai-memory registers
-  itself.
+`[TBD — needs discussion: whether a missing provider key should stop the boot. Same class of
+misconfiguration as a bad prompt, but the prompt validator logs rather than blocking, so the library
+would not be uniformly strict.]`
 
-`[TBD — needs discussion: whether a missing provider key should also stop the boot. Same class of
-misconfiguration, but the prompt validator logs rather than blocking, so the library is not uniformly
-strict.]`
+## Memory, and this library
+
+**Working position, open to change as thinking develops.** `evennia-ai-memory` stays an independent
+library, and a game that wants both composes them itself.
+
+Nothing has to be shared for that to work. Both libraries are synchronous by contract — `search_lore`
+returns, `render_prompt` returns, `chat_completion` returns — so a consumer puts all three in one
+closure and dispatches it once:
+
+```python
+def _work():
+    lore = search_lore(query_text, scope_tags)
+    prompt = render_prompt("npc/bartender.md", {"name": npc.key, "memory": lore})
+    return LLMService.chat_completion(messages=[{"role": "system", "content": prompt}, ...])
+
+d = deferToThread(_work)
+```
+
+Retrieved memory arrives as an ordinary prompt variable. The library needs no reserved placeholder, no
+knowledge that ai-memory exists, and no import of it.
+
+This is why principle 7 in [../CLAUDE.md](../CLAUDE.md) matters: neither library may dispatch
+internally. A library that wrapped its own work in `deferToThread` would force a hop inside a hop and
+make the two awkward to compose. Keeping both synchronous is what buys the composition, and it costs
+the consumer one documented instruction rather than a dependency.
