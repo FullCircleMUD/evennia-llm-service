@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evennia-llm-service"
+version = "0.0.1"
+description = "The LLM call, and the prompt that goes into it — a provider client and template loader for Evennia games."
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+authors = [{name = "Tim Baird"}]
+requires-python = ">=3.10"
+keywords = ["evennia", "mud", "llm", "npc", "prompts", "openrouter"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment :: Multi-User Dungeons (MUD)",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+# The library-standards default. The dependency floor has not been discussed —
+# see the TBD under "Tools and environment" in CLAUDE.md. No provider SDK is
+# declared, because which provider surface the library uses is undecided.
+dependencies = [
+    "evennia",
+    "openai",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "twine",
+]
+
+[project.urls]
+Homepage = "https://github.com/FullCircleMUD/evennia-llm-service"
+Repository = "https://github.com/FullCircleMUD/evennia-llm-service"
+Issues = "https://github.com/FullCircleMUD/evennia-llm-service/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["evennia_llm_service*"]
