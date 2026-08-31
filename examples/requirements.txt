@@ -1,0 +1,14 @@
+# Dependencies for the demo gamedirs in this folder.
+#
+# Install from THIS directory, with examples/venv activated:
+#
+#     pip install -r requirements.txt
+#
+# pip resolves the relative path below against the working directory, so
+# running it from anywhere else will not find the library.
+
+# The library itself, editable — edits in ../src/ are picked up by the demo
+# game without reinstalling. This also pulls in everything the library
+# declares in its pyproject: evennia and openai. Do not list those again
+# here; a second declaration is one that can drift from the real one.
+-e ..

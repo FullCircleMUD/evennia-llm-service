@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Evennia gamedir secrets. Demo gamedirs under examples/ carry a real
+# provider key in secret_settings; it never belongs in the repo.
+secret_settings.py
+secret_settings.local
+server/conf/*.local

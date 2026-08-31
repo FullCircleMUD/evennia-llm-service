@@ -4,7 +4,18 @@ Running log of milestones with links to evidence. Reverse chronological — newe
 
 ## 2026-08-31 (latest)
 
-- **Stage one implemented — 53 tests, all green.** `LLMService.chat_completion` and `_get_client` in
+- **Live-tested in a running Evennia game.** A demo gamedir at `examples/demo-game/` installed the
+  library, booted, and made a real call to OpenRouter that came back in character. Everything the unit
+  suite cannot reach was exercised: `AppConfig.ready()` fired, the prompts directory was created and
+  resolved to `examples/demo-game/llm_service/prompts` rather than the package, a template loaded and
+  rendered with its placeholders filled, and the completion returned content. Only `LLM_API_KEY` was
+  set — the other four defaults carried the rest.
+
+  Not exercised, and worth knowing before FCM: the off-thread dispatch (the test called
+  `chat_completion` straight from `py`, which blocked the server for the duration) and anything under
+  shards.
+
+- **Stage one implemented — 54 tests, all green.** `LLMService.chat_completion` and `_get_client` in
   `service.py`; the prompts directory, loading, rendering and cache in `prompt_loader.py`; the logging
   shim in `log.py`; and an `AppConfig` whose `ready()` settles the prompts directory and logs where it
   is. `library-standards-linter` reports no errors and no warnings.
