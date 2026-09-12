@@ -6,6 +6,7 @@ Stage one: these cover the behaviour lifted from FullCircleMUD's
 """
 
 import ast
+import contextlib
 import os
 import shutil
 import tempfile
@@ -18,9 +19,8 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 
 import evennia_llm_service
-from evennia_llm_service import apps, config, prompt_loader, service
+from evennia_llm_service import apps, config, log, prompt_loader, service
 from evennia_llm_service.config import (
-    DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     SETTING_PROMPT_FOLDER_PATH,
     check_settings,
@@ -101,6 +101,45 @@ class ServiceCase(SimpleTestCase):
 MESSAGES = [{"role": "user", "content": "hello"}]
 
 
+def clear_logs():
+    """Empty LOG_DIR's files so a line read back was written by this test.
+
+    Truncated, never removed: Evennia's ``_open_log_file`` caches the handle
+    after the first write, and removing the file leaves that handle appending
+    to an unlinked inode — every later line silently vanishes. An append-mode
+    handle seeks to the end on each write, so a truncated file stays live.
+    """
+    for name in os.listdir(settings.LOG_DIR):
+        if name.endswith(".log"):
+            with open(os.path.join(settings.LOG_DIR, name), "w"):
+                pass
+
+
+def read_back_logs():
+    """Every line in LOG_DIR's files, as one string."""
+    text = []
+    for name in sorted(os.listdir(settings.LOG_DIR)):
+        if name.endswith(".log"):
+            with open(os.path.join(settings.LOG_DIR, name)) as handle:
+                text.append(handle.read())
+    return "\n".join(text)
+
+
+@contextlib.contextmanager
+def undeclared(*names):
+    """Run the block with ``names`` absent from settings entirely.
+
+    The test settings must declare whatever the boot check requires, or the
+    suite cannot bootstrap. A case about an *undeclared* setting therefore
+    removes it for itself rather than relying on the file staying empty —
+    which also keeps the case honest if the test settings change again.
+    """
+    with override_settings():
+        for name in names:
+            delattr(settings, name)
+        yield
+
+
 def folder(value):
     """Point ``LLM_PROMPT_FOLDER_PATH`` at ``value`` for the block.
 
@@ -115,7 +154,8 @@ def folder(value):
 
 
 class CheckSettingsTests(SimpleTestCase):
-    """CF-01 to CF-07 — what the boot check refuses, and what calls it."""
+    """CF-01 to CF-07 and CF-17 to CF-19 — what the boot check refuses, what
+    calls it, and what a boot puts in the log."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="llm_folder_")
@@ -167,6 +207,134 @@ class CheckSettingsTests(SimpleTestCase):
             apps.EvenniaLLMServiceConfig.ready(mock.Mock())
         checked.assert_called_once_with()
 
+    def boot(self):
+        """Boot against the temporary folder and return what was logged."""
+        with folder(self.dir):
+            with mock.patch.object(apps, "llm_service_log") as log:
+                apps.EvenniaLLMServiceConfig.ready(mock.Mock())
+        return log
+
+    def test_cf_17_successful_boot_logs_one_line(self):
+        """CF-17"""
+        log = self.boot()
+        self.assertEqual(log.call_count, 1)
+        self.assertIn(self.dir, str(log.call_args))
+        # INFO is the shim's default, so a boot line names no level at all.
+        # Asserting the resolved level keeps the case true either way.
+        self.assertEqual(log.call_args.kwargs.get("level", "INFO"), "INFO")
+
+    def test_cf_18_boot_line_reports_enabled_state(self):
+        """CF-18"""
+        self.assertIn("True", str(self.boot().call_args))
+        with override_settings(LLM_ENABLED=False):
+            self.assertIn("False", str(self.boot().call_args))
+
+    def assertLoggedBeforeRaising(self, value):
+        """One ERROR on disk, carrying the same text the caller is raised.
+
+        Read back from the file rather than mocked. A mock proves the library
+        called the log function; only the file proves a line landed — and the
+        refusal fires during ``django.setup()``, the one window where the
+        extension is known to drop lines silently.
+        """
+        clear_logs()
+        with folder(value):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+        written = read_back_logs()
+        self.assertIn(str(caught.exception), written)
+        self.assertIn("[ERROR]", written)
+
+    def test_cf_20_undeclared_folder_logs_before_raising(self):
+        """CF-20"""
+        self.assertLoggedBeforeRaising(None)
+        self.assertLoggedBeforeRaising("")
+
+    def test_cf_21_missing_folder_logs_before_raising(self):
+        """CF-21"""
+        self.assertLoggedBeforeRaising(os.path.join(self.dir, "not_there"))
+
+    def test_cf_22_file_instead_of_folder_logs_before_raising(self):
+        """CF-22"""
+        path = os.path.join(self.dir, "prompts.md")
+        with open(path, "w") as handle:
+            handle.write("a template, where a folder was meant to be")
+        self.assertLoggedBeforeRaising(path)
+
+    def test_cf_23_enabled_without_api_key_refuses_boot(self):
+        """CF-23"""
+        with folder(self.dir), override_settings(LLM_ENABLED=True, LLM_API_KEY=""):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+        self.assertIn("LLM_API_KEY", str(caught.exception))
+
+    def test_cf_24_disabled_without_api_key_boots(self):
+        """CF-24"""
+        with folder(self.dir), override_settings(LLM_ENABLED=False, LLM_API_KEY=""):
+            self.assertIsNone(check_settings())
+
+    def test_cf_25_enabled_with_api_key_boots(self):
+        """CF-25"""
+        with folder(self.dir), override_settings(LLM_ENABLED=True, LLM_API_KEY="key-123"):
+            self.assertIsNone(check_settings())
+
+    def test_cf_26_missing_api_key_logs_before_raising(self):
+        """CF-26"""
+        clear_logs()
+        with folder(self.dir), override_settings(LLM_ENABLED=True, LLM_API_KEY=""):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+        written = read_back_logs()
+        self.assertIn(str(caught.exception), written)
+        self.assertIn("[ERROR]", written)
+
+    def test_cf_27_enabled_without_base_url_refuses_boot(self):
+        """CF-27"""
+        with folder(self.dir), override_settings(
+            LLM_ENABLED=True, LLM_API_KEY="key-123", LLM_API_BASE_URL=""
+        ):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+        self.assertIn("LLM_API_BASE_URL", str(caught.exception))
+
+    def test_cf_28_malformed_base_url_refuses_boot(self):
+        """CF-28"""
+        for bad in ("openrouter.ai/api/v1", "https://", "ftp://example.test", "not a url"):
+            with self.subTest(url=bad):
+                with folder(self.dir), override_settings(
+                    LLM_ENABLED=True, LLM_API_KEY="key-123", LLM_API_BASE_URL=bad
+                ):
+                    with self.assertRaises(ImproperlyConfigured) as caught:
+                        check_settings()
+                self.assertIn(bad, str(caught.exception))
+
+    def test_cf_29_disabled_without_base_url_boots(self):
+        """CF-29"""
+        with folder(self.dir), override_settings(
+            LLM_ENABLED=False, LLM_API_KEY="", LLM_API_BASE_URL=""
+        ):
+            self.assertIsNone(check_settings())
+
+    def test_cf_30_missing_base_url_logs_before_raising(self):
+        """CF-30"""
+        clear_logs()
+        with folder(self.dir), override_settings(
+            LLM_ENABLED=True, LLM_API_KEY="key-123", LLM_API_BASE_URL=""
+        ):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+        written = read_back_logs()
+        self.assertIn(str(caught.exception), written)
+        self.assertIn("[ERROR]", written)
+
+    def test_cf_19_refused_boot_logs_no_start_line(self):
+        """CF-19"""
+        with folder(None):
+            with mock.patch.object(apps, "llm_service_log") as log:
+                with self.assertRaises(ImproperlyConfigured):
+                    apps.EvenniaLLMServiceConfig.ready(mock.Mock())
+        log.assert_not_called()
+
 
 class AccessorTests(SimpleTestCase):
     """CF-08 to CF-16 — every setting reaches the library through config.py."""
@@ -194,18 +362,18 @@ class AccessorTests(SimpleTestCase):
 
     def test_cf_11_api_key_defaults_empty(self):
         """CF-11"""
-        self.assertUndeclared("LLM_API_KEY")
-        self.assertEqual(config.get_api_key(), "")
+        with undeclared("LLM_API_KEY"):
+            self.assertEqual(config.get_api_key(), "")
 
     def test_cf_12_api_key_returns_declared_value(self):
         """CF-12"""
         with override_settings(LLM_API_KEY="key-123"):
             self.assertEqual(config.get_api_key(), "key-123")
 
-    def test_cf_13_base_url_defaults_to_openrouter(self):
+    def test_cf_13_base_url_defaults_empty(self):
         """CF-13"""
-        self.assertUndeclared("LLM_API_BASE_URL")
-        self.assertEqual(config.get_api_base_url(), DEFAULT_BASE_URL)
+        with undeclared("LLM_API_BASE_URL"):
+            self.assertEqual(config.get_api_base_url(), "")
 
     def test_cf_14_base_url_returns_declared_value(self):
         """CF-14"""
@@ -295,6 +463,28 @@ class ChatCompletionTests(ServiceCase):
         result = LLMService.chat_completion(MESSAGES)
         self.assertIsInstance(result, str)
 
+    def test_cc_20_none_content_logs_warning(self):
+        self.install_client(make_response(None))
+        with mock.patch.object(service, "llm_service_log") as log:
+            LLMService.chat_completion(MESSAGES, model="openai/gpt-4o", npc_key="npc#7")
+        logged = " ".join(str(c) for c in log.call_args_list)
+        self.assertIn("WARN", logged)
+        self.assertIn("openai/gpt-4o", logged)
+        self.assertIn("npc#7", logged)
+
+    def test_cc_21_none_content_returns_none(self):
+        self.install_client(make_response(None))
+        self.assertIsNone(LLMService.chat_completion(MESSAGES))
+
+    def test_cc_22_empty_content_treated_as_no_reply(self):
+        for content in ("", "   \n"):
+            with self.subTest(content=content):
+                reset_state()
+                self.install_client(make_response(content))
+                with mock.patch.object(service, "llm_service_log") as log:
+                    self.assertIsNone(LLMService.chat_completion(MESSAGES))
+                self.assertIn("WARN", " ".join(str(c) for c in log.call_args_list))
+
 
 # ── CL — client construction ──────────────────────────────────────────
 
@@ -312,16 +502,13 @@ class ClientConstructionTests(ServiceCase):
         )
 
     @override_settings(LLM_API_KEY="key-123")
-    def test_cl_02_completion_base_url_defaults_to_openrouter(self):
-        with self.patched_openai() as ctor:
-            LLMService._get_client()
-        self.assertEqual(
-            ctor.call_args.kwargs["base_url"], "https://openrouter.ai/api/v1"
-        )
-
     def test_cl_03_missing_key_builds_with_empty_string(self):
-        with self.patched_openai() as ctor:
-            LLMService._get_client()
+        # Reachable only with the library disabled — check_settings refuses a
+        # boot that is enabled without a key (CF-23). _get_client still has to
+        # behave rather than raise, since nothing guards it directly.
+        with undeclared("LLM_API_KEY"):
+            with self.patched_openai() as ctor:
+                LLMService._get_client()
         self.assertEqual(ctor.call_args.kwargs["api_key"], "")
 
     def test_cl_04_completion_client_built_once(self):
@@ -426,9 +613,67 @@ class LoadPromptTests(PromptCase):
         self.write_prompt("later.md", "now it exists")
         self.assertIsNone(prompt_loader.load_prompt("later.md"))
 
-    def test_pl_10_empty_file_returns_empty_string(self):
+    def test_pl_16_empty_template_logs_warning_with_path(self):
+        path = self.write_prompt("empty.md", "")
+        with mock.patch.object(prompt_loader, "llm_service_log") as log:
+            prompt_loader.load_prompt("empty.md")
+        logged = " ".join(str(c) for c in log.call_args_list)
+        self.assertIn(path, logged)
+        self.assertIn("WARN", logged)
+
+    def test_pl_17_empty_template_returns_none(self):
         self.write_prompt("empty.md", "")
-        self.assertEqual(prompt_loader.load_prompt("empty.md"), "")
+        self.assertIsNone(prompt_loader.load_prompt("empty.md"))
+
+    def unreadable_prompt(self, name):
+        """A template that exists but the process cannot read."""
+        path = self.write_prompt(name, "you will never read me")
+        os.chmod(path, 0o000)
+        # Restored so the temporary directory can be removed afterwards.
+        self.addCleanup(os.chmod, path, 0o600)
+        return path
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a 0o000 file regardless")
+    def test_pl_11_unreadable_template_logs_error_with_path(self):
+        path = self.unreadable_prompt("locked.md")
+        with mock.patch.object(prompt_loader, "llm_service_log") as log:
+            prompt_loader.load_prompt("locked.md")
+        logged = " ".join(str(c) for c in log.call_args_list)
+        self.assertIn(path, logged)
+        self.assertIn("ERROR", logged)
+        # The reason, so permissions and encoding are told apart in the log
+        # without needing a traceback.
+        self.assertIn("Permission denied", logged)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a 0o000 file regardless")
+    def test_pl_12_unreadable_template_returns_none(self):
+        self.unreadable_prompt("locked.md")
+        self.assertIsNone(prompt_loader.load_prompt("locked.md"))
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a 0o000 file regardless")
+    def test_pl_13_unreadable_template_is_cached_as_none(self):
+        path = self.unreadable_prompt("locked.md")
+        with mock.patch.object(prompt_loader, "llm_service_log") as log:
+            self.assertIsNone(prompt_loader.load_prompt("locked.md"))
+            os.chmod(path, 0o600)
+            # Readable now, but the cached None stands — proof the second
+            # call never reached the disk.
+            self.assertIsNone(prompt_loader.load_prompt("locked.md"))
+        self.assertEqual(log.call_count, 1)
+
+    def test_pl_14_directory_treated_as_unreadable(self):
+        os.makedirs(os.path.join(self.dir, "bartender.md"))
+        with mock.patch.object(prompt_loader, "llm_service_log") as log:
+            self.assertIsNone(prompt_loader.load_prompt("bartender.md"))
+        self.assertIn("bartender.md", " ".join(str(c) for c in log.call_args_list))
+
+    def test_pl_15_undecodable_template_treated_as_unreadable(self):
+        path = os.path.join(self.dir, "cp1252.md")
+        with open(path, "wb") as handle:
+            handle.write(b"You are \xff\xfe not valid utf-8")
+        with mock.patch.object(prompt_loader, "llm_service_log") as log:
+            self.assertIsNone(prompt_loader.load_prompt("cp1252.md"))
+        self.assertIn("cp1252.md", " ".join(str(c) for c in log.call_args_list))
 
 
 # ── PR — render_prompt ────────────────────────────────────────────────
@@ -508,8 +753,6 @@ class CrossCuttingTests(ServiceCase):
     def test_xc_02_settings_read_with_defaults(self):
         for name in (
             "LLM_ENABLED",
-            "LLM_API_KEY",
-            "LLM_API_BASE_URL",
             "LLM_DEFAULT_MODEL",
             "LLM_GLOBAL_MAX_CALLS_PER_MINUTE",
             "LLM_PER_NPC_MAX_CALLS_PER_MINUTE",

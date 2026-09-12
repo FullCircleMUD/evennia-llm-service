@@ -34,6 +34,11 @@ INSTALLED_APPS = list(INSTALLED_APPS) + ["evennia_llm_service"]  # noqa: F405
 LLM_PROMPT_FOLDER_PATH = os.path.join(tempfile.gettempdir(), "evennia_llm_service_test_prompts")
 os.makedirs(LLM_PROMPT_FOLDER_PATH, exist_ok=True)
 
+# The library refuses to boot enabled without a key and an endpoint. Neither is
+# ever used to reach a provider — every test installs a fake client.
+LLM_API_KEY = "test-only-not-a-real-key"
+LLM_API_BASE_URL = "https://provider.test/v1"
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

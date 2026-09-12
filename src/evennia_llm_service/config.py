@@ -22,6 +22,7 @@ returns ``None``.
 """
 
 import os
+from urllib.parse import urlparse
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -34,8 +35,14 @@ SETTING_DEFAULT_MODEL = "LLM_DEFAULT_MODEL"
 #: Used when neither the caller nor the consumer names a model.
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 
-#: Used when the consumer names no endpoint.
-DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+#: No endpoint the library could pick would be right: which provider a game
+#: sends its traffic and its credential to is the consumer's choice. A default
+#: here would have sent an OpenAI key to whoever the default named. Blank, and
+#: refused at boot while the library is enabled.
+DEFAULT_BASE_URL = ""
+
+#: Schemes a provider endpoint can use.
+URL_SCHEMES = ("http", "https")
 
 #: Used when the consumer declares no key. The provider rejects the call and
 #: the failure is logged, which is the same path any other bad key takes.
@@ -60,7 +67,7 @@ def check_settings() -> None:
     # `not path` covers undeclared and empty together. From the library's side
     # they are the same mistake: nothing to load a template from.
     if not path:
-        raise ImproperlyConfigured(
+        _refuse(
             f"{SETTING_PROMPT_FOLDER_PATH} is not set. Point it at the folder "
             f"holding your prompt templates, e.g. '/path/to/game/prompts'. The "
             f"library ships no prompt text, so there is no folder it can pick "
@@ -68,16 +75,65 @@ def check_settings() -> None:
         )
 
     if not os.path.exists(path):
-        raise ImproperlyConfigured(
+        _refuse(
             f"{SETTING_PROMPT_FOLDER_PATH} names {path!r}, which does not "
             f"exist. Create the folder and put your prompt templates in it."
         )
 
     if not os.path.isdir(path):
-        raise ImproperlyConfigured(
+        _refuse(
             f"{SETTING_PROMPT_FOLDER_PATH} names {path!r}, which is a file. "
             f"Point it at the folder holding your templates, not at one of them."
         )
+
+    # Required only while the library is switched on. A game still being set
+    # up has no provider account yet, and turning the library off is the
+    # supported way to run without one — so the default empty key is only ever
+    # reachable on a path that makes no calls.
+    if not get_enabled():
+        return
+
+    if not get_api_key().strip():
+        _refuse(
+            f"{SETTING_API_KEY} is not set, and {SETTING_ENABLED} is on. Every "
+            f"call would be rejected by the provider. Set the key, or set "
+            f"{SETTING_ENABLED} = False to run without one."
+        )
+
+    base_url = get_api_base_url().strip()
+
+    if not base_url:
+        _refuse(
+            f"{SETTING_API_BASE_URL} is not set, and {SETTING_ENABLED} is on. "
+            f"Name the provider endpoint your key belongs to, e.g. "
+            f"'https://openrouter.ai/api/v1'. The library picks no provider for "
+            f"you — a default would send your key somewhere you did not choose."
+        )
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in URL_SCHEMES or not parsed.netloc:
+        _refuse(
+            f"{SETTING_API_BASE_URL} is {base_url!r}, which is not an "
+            f"http or https URL with a host. A missing 'https://' is the usual "
+            f"cause, e.g. 'https://openrouter.ai/api/v1'."
+        )
+
+
+def _refuse(message: str) -> None:
+    """Log the refusal, then raise it — one message, both channels.
+
+    A consumer whose server will not start reads the console or the log, and
+    must get the same answer from either. Evennia wraps the console traceback
+    in advice about syntax errors and wrong directories, none of which applies
+    here, so the log is often the clearer of the two.
+
+    The log import is lazy by rule: ``log.py`` and ``config.py`` importing each
+    other at module scope resolve or crash on declaration order.
+    """
+    from .log import llm_service_log
+
+    llm_service_log(message, level="ERROR")
+    raise ImproperlyConfigured(message)
 
 
 def get_prompt_folder_path() -> str:

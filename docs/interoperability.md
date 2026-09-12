@@ -8,8 +8,9 @@ settings, **reads** a folder the consumer declares, and writes to its own log fi
 files or folders, declares no Django models, registers no router, touches no `ObjectDB` row, and
 dispatches nothing off the thread it is called on.
 
-It **refuses the boot** when `LLM_PROMPT_FOLDER_PATH` is missing or unusable, which is the one way it
-can stop an instance a sibling is also running in.
+It **refuses the boot** when `LLM_PROMPT_FOLDER_PATH` is missing or unusable, or when `LLM_API_KEY` is
+blank while the library is switched on. That is the one way it can stop an instance a sibling is also
+running in.
 
 The blocking call is the one thing worth knowing about. `chat_completion` waits on a network round
 trip, so a consumer that calls it on Evennia's reactor thread stalls every connected player. The

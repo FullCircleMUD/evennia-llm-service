@@ -10,7 +10,7 @@ somewhere else.
 ## Status
 
 **Stage one complete.** The provider call, the prompt loader and the settings layer are implemented,
-with 67 tests covering them and a live test in the demo gamedir. Not yet published, and not yet
+with 89 tests covering them and a live test in the demo gamedir. Not yet published, and not yet
 installed into a consuming game. See
 [docs/progress.md](https://github.com/FullCircleMUD/evennia-llm-service/blob/main/docs/progress.md).
 
@@ -19,13 +19,15 @@ installed into a consuming game. See
 | Surface | What it gives you |
 |---|---|
 | `LLMService.chat_completion` | One synchronous call to any OpenAI-compatible provider. Returns the reply, or `None` with the reason in the log. |
-| `render_prompt` | Loads a template from your game's prompts directory and fills in its placeholders. |
+| `render_prompt` | Loads a template from your game's prompts folder and fills in its placeholders. |
 | `load_prompt` / `clear_cache` | The raw template, cached; and the flush when you have edited one. |
-| `get_prompts_dir` | The folder your templates live in, as the library resolved it. |
+| `get_prompt_folder_path` | The folder your templates live in, as the library resolved it. |
 
-Five settings. `LLM_PROMPT_FOLDER_PATH` is required — it names the folder holding your prompt
-templates, and the server refuses to start without a usable one. The other four are optional:
-`LLM_ENABLED`, `LLM_API_KEY`, `LLM_API_BASE_URL`, `LLM_DEFAULT_MODEL`.
+Five settings, three of them required. `LLM_PROMPT_FOLDER_PATH` names the folder holding your prompt
+templates and is always required. `LLM_API_KEY` and `LLM_API_BASE_URL` are required while
+`LLM_ENABLED` is on — the library names no provider for you, so which endpoint your credential goes
+to stays your decision. The server refuses to start without them and says why in the log as well as
+on the console. `LLM_ENABLED` and `LLM_DEFAULT_MODEL` are optional.
 
 ## What it deliberately does not do
 

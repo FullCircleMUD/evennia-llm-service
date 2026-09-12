@@ -34,8 +34,31 @@ def load_prompt(filename):
     if not os.path.exists(path):
         llm_service_log(f"prompt file not found: {path}", level="WARN")
         return None
-    with open(path, "r") as handle:
-        return handle.read()
+    try:
+        with open(path, "r") as handle:
+            text = handle.read()
+    except (OSError, UnicodeDecodeError) as problem:
+        # Permissions, a folder where a file was expected, a template saved
+        # in something other than UTF-8, or a file removed between the check
+        # above and this read. UnicodeDecodeError is a ValueError, not an
+        # OSError, and is the likeliest of the four in practice.
+        #
+        # The reason goes in the message rather than a traceback: the path
+        # and the errno are the whole diagnosis, and a trace through open()
+        # adds nothing a consumer can act on.
+        llm_service_log(
+            f"prompt file could not be read: {path} ({problem})", level="ERROR"
+        )
+        return None
+
+    # An empty prompt is a non-prompt. Returning "" would give the caller a
+    # second way for a template to be unusable, so it takes the same path as
+    # missing and unreadable — one thing for a caller to handle, not three.
+    if not text.strip():
+        llm_service_log(f"prompt file is empty: {path}", level="WARN")
+        return None
+
+    return text
 
 
 def render_prompt(filename, variables):

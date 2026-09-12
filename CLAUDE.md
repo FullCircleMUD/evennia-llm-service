@@ -22,9 +22,9 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 
 ## Project status
 
-**Stage one complete.** `LLMService.chat_completion`, the prompt loader, the settings accessors and the
-boot check are implemented and covered — 67 cases, all green, and live-tested in the demo gamedir. The
-library has not yet been installed into FCM.
+**Stage one complete.** `LLMService.chat_completion`, the prompt loader, the settings accessors, the
+boot check and the diagnostic logging are implemented and covered — 89 cases, all green, and
+live-tested in the demo gamedir. The library has not yet been installed into FCM.
 
 For what each stage covers and what is decided but not built, read [docs/stages.md](docs/stages.md).
 For the running milestone log, read [docs/progress.md](docs/progress.md).
@@ -55,8 +55,21 @@ For the running milestone log, read [docs/progress.md](docs/progress.md).
 5. **Every failure returns `None`, and the reason goes to the log.** The caller's action is the same
    whichever failure it was: use your fallback. This is the substrate's contract, kept for stage one —
    see [docs/stages.md](docs/stages.md) for the agreed replacement.
-6. **The library logs to its own file.** Everything goes through `log.py` to `llm_service.log`. Stdlib
-   `logging.getLogger` is not used anywhere in the package; `XC-07` asserts it.
+6. **The library logs what went wrong, never what went right.** Everything goes through `log.py` to
+   `llm_service.log`, and stdlib `logging.getLogger` is not used anywhere in the package — `XC-07`
+   asserts it. The log exists for a consumer working out why something is broken, so the bar is
+   "would this help someone troubleshooting". One INFO line per process at boot carries the resolved
+   prompts folder and the `LLM_ENABLED` state, because both are invisible otherwise and both are
+   common causes of silence. Nothing else logs a success.
+
+   **This diverges from the cascade recipe** in `ops/scratch/logging-conversion-process-2026-09-10.md`,
+   which has each public call log an INFO summary on success. That is not wanted here. A per-call
+   success line would bury the lines that matter.
+
+   Every path that returns `None` says why, at the point it happens: a missing, unreadable or empty
+   template; a provider that answered with no content; a failed call. A refusal logs at ERROR
+   **before** it raises, with the same text in both channels, so the log and the console cannot
+   disagree.
 7. **The library never dispatches off the calling thread.** Every function is synchronous and returns;
    wrapping the call is the consumer's, and the docs say so. This is what lets a consumer put a memory
    lookup, a prompt render and the completion in *one* `deferToThread` — a library that deferred
@@ -136,7 +149,8 @@ No `contrib/` — nothing opt-in exists yet, and the standards forbid scaffoldin
 
 - Python 3.10+ (pinned via `pyproject.toml`).
 - Runtime dependencies: `evennia`, `evennia-logging-extension` and `openai`. The client is
-  OpenAI-compatible, so the provider is whatever `LLM_API_BASE_URL` points at — OpenRouter by default.
+  OpenAI-compatible, so the provider is whatever `LLM_API_BASE_URL` points at. The library names none
+  and defaults to none.
   The logging extension is not on PyPI; install the checkout by path into every venv that runs the
   library, including `examples/venv/`.
 - Tests run through Django's test runner via `python runtests.py` — not pytest. No gamedir required.

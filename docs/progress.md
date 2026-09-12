@@ -4,6 +4,34 @@ Running log of milestones with links to evidence. Reverse chronological — newe
 
 ## 2026-09-12 (latest)
 
+- **Diagnostic logging, and a second required setting.** The log now says why, everywhere a caller
+  gets `None`: a template that is missing, unreadable or empty; a provider that answered with no
+  content. A template that cannot be read no longer raises through `render_prompt` into the caller,
+  and an empty template returns `None` rather than `""` — missing, unreadable and empty are one path
+  for a caller to handle instead of three. `PL-10` retires with that change.
+
+  `check_settings()` refuses a boot that is enabled with no `LLM_API_KEY` or no `LLM_API_BASE_URL`,
+  and refuses a base URL that is not an `http`/`https` URL with a host. Both stay defaulted settings
+  with a blank default, required only while `LLM_ENABLED` is on, so a game still being set up runs
+  with the library switched off and no provider account. Every refusal logs at ERROR before it
+  raises, with the same text in both channels.
+
+  The OpenRouter default came off `LLM_API_BASE_URL` and `CL-02` retires with it. Which provider a
+  game sends its traffic and its credential to is the consumer's choice: a game holding an OpenAI key
+  and no base URL would have sent that key to a third party it never named. Nothing is checked over
+  the network — a provider outage must not stop a server booting — so a well-formed URL pointing at
+  the wrong host still fails at the first call.
+
+  One INFO line per process at boot carries the resolved prompts folder and the `LLM_ENABLED` state
+  — the two things that are invisible otherwise and that account for most silence. Nothing else logs
+  a success; the library records what went wrong, not what went right, which is a deliberate
+  divergence from the cascade recipe and is written up in CLAUDE.md principle 6.
+
+  The refusal cases assert **delivery, read back from disk** rather than mocking the shim — the
+  refusal fires during `django.setup()`, the one window where the extension is known to drop lines
+  silently, and a mock cannot see that. Cascade's `clear_logs`/`read_back_logs` helpers port across
+  unchanged. 89 tests, all green.
+
 - **Settings moved behind `config.py`, and the prompts folder became the consumer's.** Five settings,
   five named accessors, and `XC-09` asserting statically that no other module reads
   `django.conf.settings`. `LLM_PROMPT_FOLDER_PATH` is required: the library ships no prompt text, so

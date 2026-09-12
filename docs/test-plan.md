@@ -51,6 +51,12 @@ moves its templates there at migration. Covered by `CF` and `PD`.
 `logging.getLogger`; every library under `libraries/` emits through a `log.py` shim to a file of
 its own. This one writes to `llm_service.log`. Covered by `XC-07`.
 
+**The log records what went wrong, not what went right.** One INFO line per process at boot, and
+after that only the paths a consumer would be troubleshooting. No case asserts a success is logged,
+and that absence is deliberate — see CLAUDE.md principle 6. The refusal cases assert delivery by
+reading the file back rather than mocking the shim, because a mock cannot see a line that was never
+written.
+
 No FCM test exercises `LLMService` or `prompt_loader` directly — the two test modules that mention
 them patch them out to test their callers. This suite is the first coverage of this code.
 
@@ -103,10 +109,24 @@ handled where it is noticed — `PL-03` covers it.
 | CF-10 | `get_enabled()` returns the consumer's value when declared | `AccessorTests.test_cf_10_enabled_returns_declared_value` |
 | CF-11 | `get_api_key()` returns `""` when `LLM_API_KEY` is undeclared | `AccessorTests.test_cf_11_api_key_defaults_empty` |
 | CF-12 | `get_api_key()` returns the consumer's value when declared | `AccessorTests.test_cf_12_api_key_returns_declared_value` |
-| CF-13 | `get_api_base_url()` returns the OpenRouter URL when `LLM_API_BASE_URL` is undeclared | `AccessorTests.test_cf_13_base_url_defaults_to_openrouter` |
+| CF-13 | `get_api_base_url()` returns `""` when `LLM_API_BASE_URL` is undeclared — reachable only with the library disabled, since the boot check refuses a blank one while it is on | `AccessorTests.test_cf_13_base_url_defaults_empty` |
 | CF-14 | `get_api_base_url()` returns the consumer's value when declared | `AccessorTests.test_cf_14_base_url_returns_declared_value` |
 | CF-15 | `get_default_model()` returns `openai/gpt-4o-mini` when `LLM_DEFAULT_MODEL` is undeclared | `AccessorTests.test_cf_15_default_model_falls_back_to_hardcoded` |
 | CF-16 | `get_default_model()` returns the consumer's value when declared | `AccessorTests.test_cf_16_default_model_returns_declared_value` |
+| CF-17 | A boot that passes the check logs one INFO line naming the resolved prompts folder — the anchor for "which run was this", and the one place a wrong-but-valid folder shows up | `CheckSettingsTests.test_cf_17_successful_boot_logs_one_line` |
+| CF-18 | That line reports whether `LLM_ENABLED` is on, so a consumer chasing silent NPCs can see it was switched off without reading the settings file | `CheckSettingsTests.test_cf_18_boot_line_reports_enabled_state` |
+| CF-19 | A refused boot logs no start line — the refusal is the message | `CheckSettingsTests.test_cf_19_refused_boot_logs_no_start_line` |
+| CF-20 | An undeclared or empty folder logs an ERROR before it raises, carrying the same text as the exception | `CheckSettingsTests.test_cf_20_undeclared_folder_logs_before_raising` |
+| CF-21 | A path that does not exist logs an ERROR before it raises, carrying the same text | `CheckSettingsTests.test_cf_21_missing_folder_logs_before_raising` |
+| CF-22 | A path that is a file logs an ERROR before it raises, carrying the same text | `CheckSettingsTests.test_cf_22_file_instead_of_folder_logs_before_raising` |
+| CF-23 | With `LLM_ENABLED` on and no `LLM_API_KEY`, the boot is refused naming the setting — every call would 401, and the game would start clean and go quiet | `CheckSettingsTests.test_cf_23_enabled_without_api_key_refuses_boot` |
+| CF-24 | With `LLM_ENABLED` off, no key is needed and the boot passes — the setup phase, before a provider account exists | `CheckSettingsTests.test_cf_24_disabled_without_api_key_boots` |
+| CF-25 | With `LLM_ENABLED` on and a key declared, the boot passes | `CheckSettingsTests.test_cf_25_enabled_with_api_key_boots` |
+| CF-26 | That refusal logs an ERROR before it raises, carrying the same text | `CheckSettingsTests.test_cf_26_missing_api_key_logs_before_raising` |
+| CF-27 | With `LLM_ENABLED` on and no `LLM_API_BASE_URL`, the boot is refused naming the setting — the library picks no provider, so there is nowhere to send the call | `CheckSettingsTests.test_cf_27_enabled_without_base_url_refuses_boot` |
+| CF-28 | A base URL that is not `http`/`https` with a host is refused, naming the value — `openrouter.ai/api/v1` with the scheme missing is the realistic typo | `CheckSettingsTests.test_cf_28_malformed_base_url_refuses_boot` |
+| CF-29 | With `LLM_ENABLED` off, no base URL is needed and the boot passes | `CheckSettingsTests.test_cf_29_disabled_without_base_url_boots` |
+| CF-30 | That refusal logs an ERROR before it raises, carrying the same text | `CheckSettingsTests.test_cf_30_missing_base_url_logs_before_raising` |
 
 ## CC — `chat_completion`
 
@@ -127,15 +147,22 @@ handled where it is noticed — `PL-03` covers it.
 | CC-14 | A provider exception is logged with the npc key | `ChatCompletionTests.test_cc_14_provider_exception_is_logged_with_npc_key` |
 | CC-19 | A response carrying no `usage` data still returns its content | `ChatCompletionTests.test_cc_19_response_without_usage_returns_content` |
 | CC-18 | The call is synchronous — it returns rather than dispatching, so a consumer can put retrieval, rendering and the completion in one `deferToThread` | `ChatCompletionTests.test_cc_18_call_is_synchronous` |
+| CC-20 | A response whose content is `None` logs a WARN naming the model and the npc key — the provider answered, but with nothing usable, and nothing else in the library would say so | `ChatCompletionTests.test_cc_20_none_content_logs_warning` |
+| CC-21 | It still returns `None`. The caller's action is unchanged; only the log is new | `ChatCompletionTests.test_cc_21_none_content_returns_none` |
+| CC-22 | A response whose content is empty or only whitespace is treated the same way — an empty reply is a non-reply, as an empty template is a non-prompt | `ChatCompletionTests.test_cc_22_empty_content_treated_as_no_reply` |
 
 ## CL — client construction
 
 Retired: CL-05 to CL-10 covered a second client for embeddings. `evennia-ai-memory` owns embedding end to end — its own settings, client and error taxonomy — so this library has no embedding surface and no second client.
 
+Retired: CL-02 had the client fall back to OpenRouter when no base URL was declared. Which provider a
+game sends its traffic and its credential to is the consumer's choice, not a default the library makes
+quietly — a game holding an OpenAI key and no base URL would have sent it to a third party it never
+named. The setting is required while the library is enabled; see `CF-27`.
+
 | ID | Case | Test function |
 |---|---|---|
 | CL-01 | The completion client is built from `LLM_API_KEY` and `LLM_API_BASE_URL` | `ClientConstructionTests.test_cl_01_completion_client_uses_key_and_base_url` |
-| CL-02 | With no `LLM_API_BASE_URL`, the OpenRouter URL is used | `ClientConstructionTests.test_cl_02_completion_base_url_defaults_to_openrouter` |
 | CL-03 | With no `LLM_API_KEY`, the client is built with an empty key rather than raising | `ClientConstructionTests.test_cl_03_missing_key_builds_with_empty_string` |
 | CL-04 | The completion client is built once and reused across calls | `ClientConstructionTests.test_cl_04_completion_client_built_once` |
 
@@ -158,6 +185,10 @@ nothing — `check_settings()` refuses a boot that names an unusable one. See th
 
 ## PL — `load_prompt` and the cache
 
+Retired: PL-10 had an empty template file return `""` rather than `None`. An empty prompt is a
+non-prompt, so it takes the same path as a missing or unreadable one — one way for the caller to
+handle "no usable template", not two. Replaced by PL-16 and PL-17.
+
 | ID | Case | Test function |
 |---|---|---|
 | PL-01 | An existing template returns its full raw text | `LoadPromptTests.test_pl_01_existing_template_returns_full_text` |
@@ -169,7 +200,13 @@ nothing — `check_settings()` refuses a boot that names an unusable one. See th
 | PL-07 | `clear_cache()` on an empty cache is a no-op | `LoadPromptTests.test_pl_07_clear_cache_on_empty_cache_is_noop` |
 | PL-08 | The cache is keyed by filename — two templates do not collide | `LoadPromptTests.test_pl_08_cache_keyed_by_filename` |
 | PL-09 | A missing template is cached as `None` and not re-read | `LoadPromptTests.test_pl_09_missing_template_is_cached_as_none` |
-| PL-10 | An empty template file returns an empty string, not `None` | `LoadPromptTests.test_pl_10_empty_file_returns_empty_string` |
+| PL-11 | A template that exists but cannot be read logs an ERROR naming the path and the reason | `LoadPromptTests.test_pl_11_unreadable_template_logs_error_with_path` |
+| PL-12 | It returns `None`, the same as a missing template — the caller cannot tell the two apart and does not need to | `LoadPromptTests.test_pl_12_unreadable_template_returns_none` |
+| PL-13 | That `None` is cached: a second call neither re-reads the file nor logs again | `LoadPromptTests.test_pl_13_unreadable_template_is_cached_as_none` |
+| PL-14 | A folder where a template was expected is treated as unreadable | `LoadPromptTests.test_pl_14_directory_treated_as_unreadable` |
+| PL-15 | A template that is not valid UTF-8 is treated as unreadable | `LoadPromptTests.test_pl_15_undecodable_template_treated_as_unreadable` |
+| PL-16 | An empty template file logs a WARN naming the path — an unfinished template is the kind of thing a consumer is trying to find | `LoadPromptTests.test_pl_16_empty_template_logs_warning_with_path` |
+| PL-17 | An empty template file returns `None`, the same as missing or unreadable — one way for a caller to handle "no usable template" | `LoadPromptTests.test_pl_17_empty_template_returns_none` |
 
 ## PR — `render_prompt`
 
@@ -193,7 +230,7 @@ nothing — `check_settings()` refuses a boot that names an unusable one. See th
 | ID | Case | Test function |
 |---|---|---|
 | XC-01 | `chat_completion` returns `None` on failure rather than raising — the current contract | `CrossCuttingTests.test_xc_01_public_functions_return_none_on_failure` |
-| XC-02 | The optional settings all default, so a consumer who declares only the required prompts folder still gets a working call | `CrossCuttingTests.test_xc_02_settings_read_with_defaults` |
+| XC-02 | Beyond the three the boot check requires, every setting defaults — a consumer declaring nothing else still gets a working call | `CrossCuttingTests.test_xc_02_settings_read_with_defaults` |
 | XC-09 | Every setting is read through `config.py` — no other module in the package touches `django.conf.settings`, asserted statically. This is what stops a second name for a setting that already has one | `CrossCuttingTests.test_xc_09_settings_read_only_through_config` |
 | XC-03 | The library imports no FCM module and reads no FCM-specific setting | `CrossCuttingTests.test_xc_03_no_fcm_imports_or_settings` |
 | XC-07 | The library logs through its own shim — no stdlib `logging.getLogger` in the package | `CrossCuttingTests.test_xc_07_no_stdlib_logging_in_the_package` |

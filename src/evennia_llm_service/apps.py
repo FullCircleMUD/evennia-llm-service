@@ -13,6 +13,8 @@ runs, and then answers a player in a voice nobody wrote.
 
 from django.apps import AppConfig
 
+from .log import llm_service_log
+
 
 class EvenniaLLMServiceConfig(AppConfig):
     """Refuses the boot when the declared prompts folder is unusable."""
@@ -20,6 +22,17 @@ class EvenniaLLMServiceConfig(AppConfig):
     name = "evennia_llm_service"
 
     def ready(self):
-        from .config import check_settings
+        from .config import check_settings, get_enabled, get_prompt_folder_path
 
         check_settings()
+
+        # The one line this library writes on a working boot. It carries the
+        # two things a consumer cannot otherwise see: which folder the
+        # templates actually resolved to — a real but wrong folder passes
+        # every check and then misses every template — and whether the
+        # library is switched on, which is the first question behind "why
+        # has every NPC gone quiet". Evennia stamps the timestamp.
+        llm_service_log(
+            f"started — prompts: {get_prompt_folder_path()}, "
+            f"enabled: {get_enabled()}"
+        )

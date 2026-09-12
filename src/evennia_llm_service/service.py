@@ -71,7 +71,7 @@ class LLMService:
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
         except Exception:
             llm_service_log(
                 f"call failed: model={model} npc={npc_key}",
@@ -79,6 +79,19 @@ class LLMService:
                 trace=True,
             )
             return None
+
+        # The provider answered, but with nothing to say — a content filter,
+        # a refusal, or an empty completion. Without this the caller gets the
+        # same None as a disabled library or a failed call, and nothing
+        # anywhere says which of the three it was.
+        if content is None or not content.strip():
+            llm_service_log(
+                f"provider returned no content: model={model} npc={npc_key}",
+                level="WARN",
+            )
+            return None
+
+        return content
 
     # ── Internal ──────────────────────────────────────────────────────
 

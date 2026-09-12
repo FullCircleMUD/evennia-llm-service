@@ -44,6 +44,10 @@ INSTALLED_APPS = INSTALLED_APPS + [
 # folder here.
 LLM_PROMPT_FOLDER_PATH = os.path.join(GAME_DIR, "llm_service", "prompts")
 
+# Required while LLM_ENABLED is on. Any OpenAI-compatible endpoint works;
+# the library names no provider and defaults to none.
+LLM_API_BASE_URL = "https://openrouter.ai/api/v1"
+
 # overwritten from secret settings
 LLM_API_KEY = ""
 
