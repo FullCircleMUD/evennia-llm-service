@@ -138,6 +138,7 @@ exists yet; the standards forbid scaffolding one empty).
 
 - **[../evennia-ai-memory/](../evennia-ai-memory/)** — owns embedding and NPC memory. The library this
   one sits closest to; see [docs/interoperability.md](docs/interoperability.md).
-- **[../evennia-shards/](../evennia-shards/)** — the `log.py` shim this library's copies, and the
-  reference for the test-runner pattern.
+- **[../evennia-logging-extension/](../evennia-logging-extension/)** — supplies `make_logger`, which
+  `log.py` binds. A hard dependency; see [docs/interoperability.md](docs/interoperability.md).
+- **[../evennia-shards/](../evennia-shards/)** — the reference for the test-runner pattern.
 - **[../evennia-message-bus/](../evennia-message-bus/)** — the `AppConfig` shape.

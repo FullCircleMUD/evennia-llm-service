@@ -40,6 +40,16 @@ it does is visible to that layer.
 
 This library.
 
+## evennia-logging-extension
+
+**Hard dependency.** Every line this library writes goes through it. [log.py](../src/evennia_llm_service/log.py)
+binds `llm_service_log` from `make_logger("llm_service.log")`, and the extension owns delivery — the
+file under `settings.LOG_DIR`, Evennia's timestamp format, and the pre-reactor window where
+`logger.log_file` is not yet available.
+
+It is not on PyPI. A consumer installs the checkout by path before installing this library; see
+[installation.md](installation.md).
+
 ## evennia-message-bus
 
 **No coupling.** Neither library imports the other. Message-bus is a transport between Evennia

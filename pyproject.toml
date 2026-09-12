@@ -29,6 +29,7 @@ classifiers = [
 # declared, because which provider surface the library uses is undecided.
 dependencies = [
     "evennia",
+    "evennia-logging-extension",
     "openai",
 ]
 

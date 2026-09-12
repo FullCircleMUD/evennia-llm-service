@@ -8,10 +8,13 @@ entry, the five settings, where prompt templates live, and where the library wri
 Not published to PyPI. From a checkout:
 
 ```bash
+pip install -e /path/to/evennia-logging-extension
 pip install -e /path/to/evennia-llm-service
 ```
 
-`evennia` and `openai` come with it.
+`evennia` and `openai` come with it. `evennia-logging-extension` does not — it is a hard dependency
+and is not on PyPI either, so it is installed by path first. Skipping it fails the server boot with
+`ModuleNotFoundError` from `at_server_start`.
 
 ## Add it to `INSTALLED_APPS`
 
@@ -99,8 +102,8 @@ key, an unknown model. The reason goes to the log.
 `llm_service.log`, alongside Evennia's own logs under `settings.LOG_DIR`. Provider failures and prompt
 problems go there, not into `server.log`.
 
-Outside a running Evennia engine the log call is a silent no-op — the library will not fall back to
-stderr or a file of its own choosing.
+Delivery belongs to `evennia-logging-extension`, which owns the file, the timestamp and the
+pre-reactor window. See [interoperability.md](interoperability.md).
 
 ## Verifying the install
 
