@@ -9,8 +9,9 @@ somewhere else.
 
 ## Status
 
-**Stage one complete.** The provider call and the prompt loader are implemented, with 53 tests
-covering them. Not yet published, and not yet installed into a consuming game. See
+**Stage one complete.** The provider call, the prompt loader and the settings layer are implemented,
+with 67 tests covering them and a live test in the demo gamedir. Not yet published, and not yet
+installed into a consuming game. See
 [docs/progress.md](https://github.com/FullCircleMUD/evennia-llm-service/blob/main/docs/progress.md).
 
 ## What it does
@@ -20,10 +21,11 @@ covering them. Not yet published, and not yet installed into a consuming game. S
 | `LLMService.chat_completion` | One synchronous call to any OpenAI-compatible provider. Returns the reply, or `None` with the reason in the log. |
 | `render_prompt` | Loads a template from your game's prompts directory and fills in its placeholders. |
 | `load_prompt` / `clear_cache` | The raw template, cached; and the flush when you have edited one. |
-| `get_prompts_dir` / `ensure_prompts_dir` | The fixed location templates live in, created for you at startup. |
+| `get_prompts_dir` | The folder your templates live in, as the library resolved it. |
 
-Five settings, all optional: `LLM_ENABLED`, `LLM_API_KEY`, `LLM_API_BASE_URL`, `LLM_DEFAULT_MODEL`,
-`LLM_PROMPTS_DIR`.
+Five settings. `LLM_PROMPT_FOLDER_PATH` is required — it names the folder holding your prompt
+templates, and the server refuses to start without a usable one. The other four are optional:
+`LLM_ENABLED`, `LLM_API_KEY`, `LLM_API_BASE_URL`, `LLM_DEFAULT_MODEL`.
 
 ## What it deliberately does not do
 
@@ -59,7 +61,7 @@ python runtests.py
 
 Then add `evennia_llm_service` to your gamedir's `INSTALLED_APPS` and set `LLM_API_KEY`. Full
 instructions, including where prompt templates go:
-**[docs/installation.md](https://github.com/FullCircleMUD/evennia-llm-service/blob/main/docs/installation.md)**.
+**[docs/installing.md](https://github.com/FullCircleMUD/evennia-llm-service/blob/main/docs/installing.md)**.
 
 ## Learn more
 

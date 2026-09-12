@@ -9,15 +9,15 @@ Case IDs are stable and referenceable. Do not renumber; retire an ID rather than
 
 ## Scope — stage one
 
-Stage one lifts FCM's `src/game/llm/` into this library unchanged: same settings, same method names,
-same signatures, same return values. Completion is reached when FCM can delete its LLM service code,
-install this library, and the game still works.
+Stage one lifts FCM's `src/game/llm/` into this library with one approved change, recorded below:
+same method names, same signatures, same return values. Completion is reached when FCM can delete its
+LLM service code, install this library, and the game still works.
 
 These cases therefore describe **what the code does today**, not what it should do. Where current
 behaviour is questionable — a bare `except` that returns `None`, a render failure that returns the
 unrendered template — the case pins the current behaviour. Changing any of it is a later stage.
 
-In scope: `service.py` and `prompt_loader.py`.
+In scope: `service.py`, `prompt_loader.py`, `config.py` and `apps.py`.
 
 **Three things are not lifted.** Each belongs to someone better placed to do it.
 
@@ -42,8 +42,10 @@ scheduled — the single exception type, the library's own log file, prompt `def
 prompt validator, memory integration, and Django wiring.
 
 **One approved change from current behaviour.** `prompt_loader` resolves its prompts directory from
-its own `__file__`, which would point at the library once moved. The library instead owns a fixed,
-expected prompts location and looks there; FCM's templates move into it at migration. Covered by `PD`.
+its own `__file__`, which would point at the library once moved. Templates are the consumer's, so the
+folder holding them is the consumer's too: `LLM_PROMPT_FOLDER_PATH` names it, `check_settings()`
+refuses a boot without a usable one, and the library creates nothing. FCM declares the setting and
+moves its templates there at migration. Covered by `CF` and `PD`.
 
 **Logging follows the library convention, not the substrate's.** FCM's modules use stdlib
 `logging.getLogger`; every library under `libraries/` emits through a `log.py` shim to a file of
@@ -54,9 +56,10 @@ them patch them out to test their callers. This suite is the first coverage of t
 
 | Prefix | Covers |
 |---|---|
+| `CF` | The settings accessors and the boot check |
 | `CC` | `chat_completion` |
 | `CL` | Provider client construction |
-| `PD` | The prompts directory |
+| `PD` | The prompts folder |
 | `PL` | `load_prompt` and the cache |
 | `PR` | `render_prompt` |
 | `XC` | Cross-cutting |
@@ -72,9 +75,38 @@ assigns the fake and clears it afterwards.
 | `make_response(content, prompt_tokens, completion_tokens)` | Builds a response shaped like the SDK's, with a `usage` that can be `None` |
 | `RaisingClient` | Raises a chosen exception from `create` |
 | `reset_state()` | Clears the cached client and the template cache between tests |
-| `tmp_prompts_dir` | A temporary directory used as the library's prompts location |
+| `folder(value)` | Points `LLM_PROMPT_FOLDER_PATH` at `value` for a block; `None` stands in for a setting the consumer never declared |
+| `PromptCase.dir` | A temporary directory, declared as the prompts folder for the life of the test |
 | `write_prompt(name, text)` | Writes a template into that directory, including subfolders |
-| `capture_logs` | Captures the module's log records so a test can assert on them |
+
+## CF — the settings accessors and the boot check
+
+Every setting is read through a named accessor in `config.py`, so a consumer who declared nothing
+gets the default rather than an `AttributeError`. Four settings have a library default and are never
+checked at boot — absence is the case the default exists for. The prompts folder has none: the
+library ships no prompt text, so there is no location it could pick that would be correct.
+
+`check_settings()` sees the folder, never its contents. A template named by an NPC but absent is
+handled where it is noticed — `PL-03` covers it.
+
+| ID | Case | Test function |
+|---|---|---|
+| CF-01 | `check_settings()` refuses a boot where `LLM_PROMPT_FOLDER_PATH` is not declared, naming the setting | `CheckSettingsTests.test_cf_01_undeclared_folder_refuses_boot` |
+| CF-02 | It refuses a declared but empty value — the same mistake as undeclared, from the library's side | `CheckSettingsTests.test_cf_02_empty_folder_refuses_boot` |
+| CF-03 | It refuses a path that does not exist, naming the path | `CheckSettingsTests.test_cf_03_missing_folder_refuses_boot` |
+| CF-04 | It refuses a path that exists but is a file rather than a directory | `CheckSettingsTests.test_cf_04_file_instead_of_folder_refuses_boot` |
+| CF-05 | It returns without raising when the path names an existing directory | `CheckSettingsTests.test_cf_05_existing_folder_boots` |
+| CF-06 | An empty directory is accepted — templates arrive after boot | `CheckSettingsTests.test_cf_06_empty_folder_is_accepted` |
+| CF-07 | `AppConfig.ready()` is what calls `check_settings()` | `CheckSettingsTests.test_cf_07_app_ready_calls_check_settings` |
+| CF-08 | `get_prompt_folder_path()` returns the declared path, with no fallback — the boot check has already refused an unusable one | `AccessorTests.test_cf_08_prompt_folder_path_returns_declared_value` |
+| CF-09 | `get_enabled()` returns `True` when `LLM_ENABLED` is undeclared | `AccessorTests.test_cf_09_enabled_defaults_true` |
+| CF-10 | `get_enabled()` returns the consumer's value when declared | `AccessorTests.test_cf_10_enabled_returns_declared_value` |
+| CF-11 | `get_api_key()` returns `""` when `LLM_API_KEY` is undeclared | `AccessorTests.test_cf_11_api_key_defaults_empty` |
+| CF-12 | `get_api_key()` returns the consumer's value when declared | `AccessorTests.test_cf_12_api_key_returns_declared_value` |
+| CF-13 | `get_api_base_url()` returns the OpenRouter URL when `LLM_API_BASE_URL` is undeclared | `AccessorTests.test_cf_13_base_url_defaults_to_openrouter` |
+| CF-14 | `get_api_base_url()` returns the consumer's value when declared | `AccessorTests.test_cf_14_base_url_returns_declared_value` |
+| CF-15 | `get_default_model()` returns `openai/gpt-4o-mini` when `LLM_DEFAULT_MODEL` is undeclared | `AccessorTests.test_cf_15_default_model_falls_back_to_hardcoded` |
+| CF-16 | `get_default_model()` returns the consumer's value when declared | `AccessorTests.test_cf_16_default_model_returns_declared_value` |
 
 ## CC — `chat_completion`
 
@@ -110,17 +142,17 @@ Retired: CL-05 to CL-10 covered a second client for embeddings. `evennia-ai-memo
 
 
 
-## PD — the prompts directory
+## PD — the prompts folder
 
-The one approved change from current behaviour.
+Where a template is looked for. The folder itself is the `CF` block's business.
+
+Retired: PD-02, PD-03, PD-06 and PD-07 covered `ensure_prompts_dir()` creating the folder at boot and
+logging that it had. The consumer owns the folder and declares where it is, so the library creates
+nothing — `check_settings()` refuses a boot that names an unusable one. See the `CF` block.
 
 | ID | Case | Test function |
 |---|---|---|
-| PD-01 | The library resolves prompts from its fixed expected location, not from its own package directory | `PromptsDirTests.test_pd_01_resolves_configured_location_not_package_dir` |
-| PD-02 | `ensure_prompts_dir()` creates the location when it is absent | `PromptsDirTests.test_pd_02_location_exists_after_startup` |
-| PD-03 | An existing location is left alone — its contents survive startup | `PromptsDirTests.test_pd_03_existing_location_left_alone` |
-| PD-06 | Creating the directory is logged, naming the path | `PromptsDirTests.test_pd_06_creation_is_logged` |
-| PD-07 | `AppConfig.ready()` is what ensures the directory exists | `PromptsDirTests.test_pd_07_app_ready_ensures_the_directory` |
+| PD-01 | Templates are loaded from the folder the consumer declared, not from the library's own package directory | `PromptsDirTests.test_pd_01_resolves_declared_folder_not_package_dir` |
 | PD-04 | A template in the location is found by bare filename, as `render_prompt("roleplay_npc.md", ...)` does today | `PromptsDirTests.test_pd_04_template_found_by_bare_filename` |
 | PD-05 | A template in a subfolder is found by relative path | `PromptsDirTests.test_pd_05_template_found_by_relative_subfolder_path` |
 
@@ -161,7 +193,8 @@ The one approved change from current behaviour.
 | ID | Case | Test function |
 |---|---|---|
 | XC-01 | `chat_completion` returns `None` on failure rather than raising — the current contract | `CrossCuttingTests.test_xc_01_public_functions_return_none_on_failure` |
-| XC-02 | Settings are read through `getattr` with defaults, so a consumer declaring none still works | `CrossCuttingTests.test_xc_02_settings_read_with_defaults` |
+| XC-02 | The optional settings all default, so a consumer who declares only the required prompts folder still gets a working call | `CrossCuttingTests.test_xc_02_settings_read_with_defaults` |
+| XC-09 | Every setting is read through `config.py` — no other module in the package touches `django.conf.settings`, asserted statically. This is what stops a second name for a setting that already has one | `CrossCuttingTests.test_xc_09_settings_read_only_through_config` |
 | XC-03 | The library imports no FCM module and reads no FCM-specific setting | `CrossCuttingTests.test_xc_03_no_fcm_imports_or_settings` |
 | XC-07 | The library logs through its own shim — no stdlib `logging.getLogger` in the package | `CrossCuttingTests.test_xc_07_no_stdlib_logging_in_the_package` |
 | XC-08 | The library never dispatches off the calling thread — no Twisted import anywhere in the package, asserted statically | `CrossCuttingTests.test_xc_08_package_never_dispatches_off_the_calling_thread` |

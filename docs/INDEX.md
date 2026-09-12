@@ -13,7 +13,7 @@ index new ones as they are written.
 
 | Document | What it covers |
 |---|---|
-| [installation.md](installation.md) | The package, the `INSTALLED_APPS` entry, the five settings, where prompt templates live, and where the library logs |
+| [installing.md](installing.md) | The package, the `INSTALLED_APPS` entry, the required prompts folder and the four optional settings, where templates live, and what is not checked for you |
 
 ## Process and discipline
 

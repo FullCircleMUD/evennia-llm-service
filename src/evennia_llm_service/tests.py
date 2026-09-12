@@ -14,10 +14,17 @@ from types import SimpleNamespace
 from unittest import mock
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 
 import evennia_llm_service
-from evennia_llm_service import apps, prompt_loader, service
+from evennia_llm_service import apps, config, prompt_loader, service
+from evennia_llm_service.config import (
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    SETTING_PROMPT_FOLDER_PATH,
+    check_settings,
+)
 from evennia_llm_service.service import LLMService
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -92,6 +99,128 @@ class ServiceCase(SimpleTestCase):
         return client
 
 MESSAGES = [{"role": "user", "content": "hello"}]
+
+
+def folder(value):
+    """Point ``LLM_PROMPT_FOLDER_PATH`` at ``value`` for the block.
+
+    ``None`` stands in for a setting the consumer never declared: the library
+    reads it with ``getattr(settings, name, None)``, so an undeclared setting
+    and one set to ``None`` reach the check as the same thing.
+    """
+    return override_settings(**{SETTING_PROMPT_FOLDER_PATH: value})
+
+
+# ── CF — the settings accessors and the boot check ────────────────────
+
+
+class CheckSettingsTests(SimpleTestCase):
+    """CF-01 to CF-07 — what the boot check refuses, and what calls it."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="llm_folder_")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def refusal(self, value):
+        """Run the check against one value and return the refusal message."""
+        with folder(value):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+        return str(caught.exception)
+
+    def test_cf_01_undeclared_folder_refuses_boot(self):
+        """CF-01"""
+        self.assertIn(SETTING_PROMPT_FOLDER_PATH, self.refusal(None))
+
+    def test_cf_02_empty_folder_refuses_boot(self):
+        """CF-02"""
+        self.assertIn(SETTING_PROMPT_FOLDER_PATH, self.refusal(""))
+
+    def test_cf_03_missing_folder_refuses_boot(self):
+        """CF-03"""
+        missing = os.path.join(self.dir, "not_there")
+        self.assertIn(missing, self.refusal(missing))
+
+    def test_cf_04_file_instead_of_folder_refuses_boot(self):
+        """CF-04"""
+        path = os.path.join(self.dir, "prompts.md")
+        with open(path, "w") as handle:
+            handle.write("a template, where a folder was meant to be")
+        self.assertIn(path, self.refusal(path))
+
+    def test_cf_05_existing_folder_boots(self):
+        """CF-05"""
+        with open(os.path.join(self.dir, "roleplay_npc.md"), "w") as handle:
+            handle.write("You are {name}.")
+        with folder(self.dir):
+            self.assertIsNone(check_settings())
+
+    def test_cf_06_empty_folder_is_accepted(self):
+        """CF-06"""
+        self.assertEqual(os.listdir(self.dir), [])
+        with folder(self.dir):
+            self.assertIsNone(check_settings())
+
+    def test_cf_07_app_ready_calls_check_settings(self):
+        """CF-07"""
+        with mock.patch.object(config, "check_settings") as checked:
+            apps.EvenniaLLMServiceConfig.ready(mock.Mock())
+        checked.assert_called_once_with()
+
+
+class AccessorTests(SimpleTestCase):
+    """CF-08 to CF-16 — every setting reaches the library through config.py."""
+
+    def assertUndeclared(self, name):
+        """Guard the default cases: they only mean something while it is unset."""
+        self.assertFalse(hasattr(settings, name), name)
+
+    def test_cf_08_prompt_folder_path_returns_declared_value(self):
+        """CF-08"""
+        with folder("/somewhere/the/consumer/chose"):
+            self.assertEqual(
+                config.get_prompt_folder_path(), "/somewhere/the/consumer/chose"
+            )
+
+    def test_cf_09_enabled_defaults_true(self):
+        """CF-09"""
+        self.assertUndeclared("LLM_ENABLED")
+        self.assertIs(config.get_enabled(), True)
+
+    def test_cf_10_enabled_returns_declared_value(self):
+        """CF-10"""
+        with override_settings(LLM_ENABLED=False):
+            self.assertIs(config.get_enabled(), False)
+
+    def test_cf_11_api_key_defaults_empty(self):
+        """CF-11"""
+        self.assertUndeclared("LLM_API_KEY")
+        self.assertEqual(config.get_api_key(), "")
+
+    def test_cf_12_api_key_returns_declared_value(self):
+        """CF-12"""
+        with override_settings(LLM_API_KEY="key-123"):
+            self.assertEqual(config.get_api_key(), "key-123")
+
+    def test_cf_13_base_url_defaults_to_openrouter(self):
+        """CF-13"""
+        self.assertUndeclared("LLM_API_BASE_URL")
+        self.assertEqual(config.get_api_base_url(), DEFAULT_BASE_URL)
+
+    def test_cf_14_base_url_returns_declared_value(self):
+        """CF-14"""
+        with override_settings(LLM_API_BASE_URL="https://example.test/v1"):
+            self.assertEqual(config.get_api_base_url(), "https://example.test/v1")
+
+    def test_cf_15_default_model_falls_back_to_hardcoded(self):
+        """CF-15"""
+        self.assertUndeclared("LLM_DEFAULT_MODEL")
+        self.assertEqual(config.get_default_model(), DEFAULT_MODEL)
+
+    def test_cf_16_default_model_returns_declared_value(self):
+        """CF-16"""
+        with override_settings(LLM_DEFAULT_MODEL="anthropic/claude-haiku"):
+            self.assertEqual(config.get_default_model(), "anthropic/claude-haiku")
 
 
 # ── CC — chat_completion ──────────────────────────────────────────────
@@ -213,7 +342,7 @@ class PromptCase(SimpleTestCase):
         self.addCleanup(reset_state)
         self.dir = tempfile.mkdtemp(prefix="llm_prompts_")
         self.addCleanup(shutil.rmtree, self.dir, True)
-        override = override_settings(LLM_PROMPTS_DIR=self.dir)
+        override = folder(self.dir)
         override.enable()
         self.addCleanup(override.disable)
 
@@ -229,34 +358,11 @@ class PromptCase(SimpleTestCase):
 
 
 class PromptsDirTests(PromptCase):
-    def test_pd_01_resolves_configured_location_not_package_dir(self):
+    def test_pd_01_resolves_declared_folder_not_package_dir(self):
         package_dir = os.path.dirname(prompt_loader.__file__)
-        resolved = prompt_loader.get_prompts_dir()
-        self.assertEqual(os.path.realpath(resolved), os.path.realpath(self.dir))
-        self.assertNotEqual(os.path.realpath(resolved), os.path.realpath(package_dir))
-
-    def test_pd_02_location_exists_after_startup(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
-        prompt_loader.ensure_prompts_dir()
-        self.assertTrue(os.path.isdir(self.dir))
-
-    def test_pd_03_existing_location_left_alone(self):
-        self.write_prompt("keep.md", "kept")
-        prompt_loader.ensure_prompts_dir()
-        with open(os.path.join(self.dir, "keep.md")) as handle:
-            self.assertEqual(handle.read(), "kept")
-
-    def test_pd_06_creation_is_logged(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
-        with mock.patch.object(apps, "llm_service_log") as log:
-            apps.EvenniaLLMServiceConfig.ready(mock.Mock())
-        self.assertIn(self.dir, " ".join(str(c) for c in log.call_args_list))
-
-    def test_pd_07_app_ready_ensures_the_directory(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
-        with mock.patch.object(apps, "llm_service_log"):
-            apps.EvenniaLLMServiceConfig.ready(mock.Mock())
-        self.assertTrue(os.path.isdir(self.dir))
+        self.write_prompt("here.md", "in the declared folder")
+        self.assertEqual(prompt_loader.load_prompt("here.md"), "in the declared folder")
+        self.assertFalse(os.path.exists(os.path.join(package_dir, "here.md")))
 
     def test_pd_04_template_found_by_bare_filename(self):
         self.write_prompt("roleplay_npc.md", "You are {name}.")
@@ -437,6 +543,24 @@ class CrossCuttingTests(ServiceCase):
                 with open(os.path.join(root, name)) as handle:
                     if "logging.getLogger" in handle.read():
                         offenders.append(name)
+        self.assertEqual(offenders, [])
+
+    def test_xc_09_settings_read_only_through_config(self):
+        # config.py is the one place a setting name is written down. A second
+        # module reading django.conf.settings is how a library ends up
+        # validating one setting at boot and reading a different one at
+        # runtime — which is exactly what this catches.
+        package_dir = os.path.dirname(evennia_llm_service.__file__)
+        offenders = []
+        for root, _dirs, files in os.walk(package_dir):
+            for name in files:
+                if not name.endswith(".py") or name in ("tests.py", "config.py"):
+                    continue
+                tree = ast.parse(open(os.path.join(root, name)).read())
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ImportFrom) and node.module == "django.conf":
+                        if any(a.name == "settings" for a in node.names):
+                            offenders.append(f"{name}:{node.lineno}")
         self.assertEqual(offenders, [])
 
     def test_xc_08_package_never_dispatches_off_the_calling_thread(self):

@@ -4,9 +4,12 @@ This library against every sibling library in `libraries/`.
 
 What this library does that could constrain a sibling is short, because the library is short. It makes
 one **outbound network call** on the calling thread, holds a **provider API key** read from Django
-settings, creates a **directory under `GAME_DIR`** at `AppConfig.ready()`, and writes to its own log
-file. It declares no Django models, registers no router, touches no `ObjectDB` row, and dispatches
-nothing off the thread it is called on.
+settings, **reads** a folder the consumer declares, and writes to its own log file. It creates no
+files or folders, declares no Django models, registers no router, touches no `ObjectDB` row, and
+dispatches nothing off the thread it is called on.
+
+It **refuses the boot** when `LLM_PROMPT_FOLDER_PATH` is missing or unusable, which is the one way it
+can stop an instance a sibling is also running in.
 
 The blocking call is the one thing worth knowing about. `chat_completion` waits on a network round
 trip, so a consumer that calls it on Evennia's reactor thread stalls every connected player. The
@@ -36,6 +39,22 @@ Keeping them independent is the working position, not an accident of sequencing.
 second alias; this library declares no models, registers no router and issues no ORM query, so nothing
 it does is visible to that layer.
 
+## evennia-calendar
+
+**No coupling.** Neither library imports the other. Calendar answers what the in-game time is; a
+consumer wanting that in a prompt passes it as a template variable, which is consumer code either way.
+
+## evennia-database-cascade
+
+**No coupling.** Neither library imports the other. This library declares no models and no `db_spec`,
+so it is invisible to the cascade's discovery and routing.
+
+## evennia-equipment
+
+**No coupling.** Neither library imports the other. Both refuse a boot over a missing setting, so a
+consumer running both fixes one refusal and may then meet the other — each message names its own
+setting.
+
 ## evennia-llm-service
 
 This library.
@@ -48,7 +67,7 @@ file under `settings.LOG_DIR`, Evennia's timestamp format, and the pre-reactor w
 `logger.log_file` is not yet available.
 
 It is not on PyPI. A consumer installs the checkout by path before installing this library; see
-[installation.md](installation.md).
+[installing.md](installing.md).
 
 ## evennia-message-bus
 
@@ -62,6 +81,18 @@ holds no state that would need to reach another instance.
 this library resolves no game object and holds no reference to one. `npc_key` is an opaque string used
 in a log line — this library never looks up what it refers to, so a despawn cannot invalidate anything
 it holds.
+
+## evennia-portal-multiplex
+
+**No coupling.** Neither library imports the other. Multiplex works at the portal; this library runs
+in the server process and holds no connection state.
+
+## evennia-scaling
+
+**No coupling, with the same constraint shards carries.** Neither library imports the other. The
+blocking call is the thing to watch: a consumer running several instances dispatches
+`chat_completion` off the reactor itself, and a per-process limit is not a global one — which is part
+of why this library enforces no rate limit or spend cap. See [stages.md](stages.md).
 
 ## evennia-shards
 
@@ -82,6 +113,11 @@ One thing shards makes concrete: a per-process limit is not a global one. That i
 library enforces no rate limit or spend cap — a game running a router and two shards would have three
 of each. See [stages.md](stages.md).
 
+## evennia-survival
+
+**No coupling.** Neither library imports the other. Survival tracks meters on a character; a consumer
+wanting an NPC's hunger to colour its dialogue passes it as a template variable.
+
 ## evennia-targeting
 
 **No coupling.** Neither library imports the other. Targeting filters candidate lists already in hand
@@ -91,11 +127,21 @@ and issues no call this library would serve.
 
 **No coupling.** Neither library imports the other.
 
-Both write under `GAME_DIR` — world-builder builds from a content repo, this library creates
-`llm_service/prompts/`. The paths do not overlap and neither reads the other's, but a consumer moving
-either with a setting should keep them distinct.
+World-builder builds from a content repo; this library only reads the prompts folder the consumer
+declared. Neither reads the other's paths, and a consumer pointing both at settings of their own
+should keep them distinct.
 
 ## evennia-yaml-reader
 
 **No coupling.** Neither library imports the other. Prompt templates are plain text rendered with
 `str.format_map`; nothing in this library parses YAML.
+
+## fcm-telemetry-spawn
+
+**No coupling.** Neither library imports the other. This library emits no telemetry and records no
+metric — the log line is its only output.
+
+## fcm-xrpl
+
+**No coupling.** Neither library imports the other. This library holds a provider API key and no
+wallet, key material or ledger state.

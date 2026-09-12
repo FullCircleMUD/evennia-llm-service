@@ -39,6 +39,11 @@ INSTALLED_APPS = INSTALLED_APPS + [
     "evennia_llm_service",
 ]
 
+# Required. Names the folder holding this game's prompt templates — the
+# library ships none, creates nothing, and refuses to start without a usable
+# folder here.
+LLM_PROMPT_FOLDER_PATH = os.path.join(GAME_DIR, "llm_service", "prompts")
+
 # overwritten from secret settings
 LLM_API_KEY = ""
 

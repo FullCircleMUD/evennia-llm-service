@@ -1,9 +1,10 @@
-# Installation
+# Installing
 
 How to install `evennia-llm-service` into an Evennia game: the package, the one `INSTALLED_APPS`
-entry, the five settings, where prompt templates live, and where the library writes its log.
+entry, the one required setting and four optional ones, where prompt templates live, and where the
+library writes its log.
 
-## Install the package
+## 1. Install the package
 
 Not published to PyPI. From a checkout:
 
@@ -16,7 +17,7 @@ pip install -e /path/to/evennia-llm-service
 and is not on PyPI either, so it is installed by path first. Skipping it fails the server boot with
 `ModuleNotFoundError` from `at_server_start`.
 
-## Add it to `INSTALLED_APPS`
+## 2. Add it to `INSTALLED_APPS`
 
 In the gamedir's `server/conf/settings.py`:
 
@@ -27,13 +28,27 @@ INSTALLED_APPS = INSTALLED_APPS + [
 ```
 
 **Required.** The library declares no Django models and needs no migrations, so the entry exists for
-one reason: it is what makes `AppConfig.ready()` fire, and `ready()` is where the prompts directory is
-settled. Without it the directory is never created and every template lookup logs a miss.
+one reason: it is what makes `AppConfig.ready()` fire, and `ready()` is where your settings are
+checked. Without it a misconfigured game starts cleanly and fails later, in front of a player.
 
-## Settings
+## 3. Declare the prompts folder — required settings
 
-All five are optional — each is read with a default, so a game that declares none still starts. In
-practice you will set at least `LLM_API_KEY`.
+**Required. The server will not start without it.**
+
+```python
+LLM_PROMPT_FOLDER_PATH = os.path.join(GAME_DIR, "llm_service", "prompts")
+```
+
+Point it anywhere you like — the folder is yours. The library ships no prompt text and creates no
+folder, so there is none it could pick for you. Make the folder before you start the server.
+
+`ready()` refuses the boot with `ImproperlyConfigured` if the setting is missing, names a path that
+does not exist, or names a file rather than a folder. The message names the setting and the path.
+
+## 4. Optional settings
+
+Each is read with a default, so declaring none of these still starts. In practice you will set at
+least `LLM_API_KEY`.
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -41,7 +56,6 @@ practice you will set at least `LLM_API_KEY`.
 | `LLM_API_KEY` | `""` | Provider API key. |
 | `LLM_API_BASE_URL` | `https://openrouter.ai/api/v1` | Provider endpoint. Anything OpenAI-compatible works. |
 | `LLM_DEFAULT_MODEL` | `openai/gpt-4o-mini` | Used when a caller names no model. |
-| `LLM_PROMPTS_DIR` | `<GAME_DIR>/llm_service/prompts` | Where prompt templates are loaded from. |
 
 Put the key in secret settings or the environment, not in a file you commit.
 
@@ -54,13 +68,12 @@ has three of those.
 
 Throttling a single NPC is a different problem and a game rule: do it on the NPC.
 
-## Prompt templates
+## 5. Write your prompt templates
 
 Templates are the game's, not the library's. The library ships none.
 
-They live in `<GAME_DIR>/llm_service/prompts/` unless `LLM_PROMPTS_DIR` says otherwise. The directory
-is created at startup if it is missing. Organise it however you like — a template is named by its path
-relative to that directory, so subfolders work:
+They live wherever `LLM_PROMPT_FOLDER_PATH` points. Organise the folder however you like — a template
+is named by its path relative to it, so subfolders work:
 
 ```python
 from evennia_llm_service import render_prompt
@@ -105,6 +118,17 @@ problems go there, not into `server.log`.
 Delivery belongs to `evennia-logging-extension`, which owns the file, the timestamp and the
 pre-reactor window. See [interoperability.md](interoperability.md).
 
+## What is not checked for you
+
+`check_settings()` sees the folder, never what is in it. These are yours to get right:
+
+- **That a template an NPC names is actually there.** Templates are added and renamed long after boot.
+  A missing one logs a WARN naming the path and returns `None` — your caller decides what to say
+  instead.
+- **That a placeholder has a matching variable.** An unmatched `{name}` stays in the text.
+- **That the API key works.** A bad key is a failed call returning `None`, not a refused boot.
+- **That you are off the reactor thread.** `chat_completion` blocks; wrapping it is yours.
+
 ## Verifying the install
 
 From the library checkout:
@@ -113,5 +137,5 @@ From the library checkout:
 python runtests.py
 ```
 
-53 tests, no gamedir required. In a consuming game, the startup line in `llm_service.log` naming the
-prompts directory is the confirmation that `ready()` ran.
+67 tests, no gamedir required. In a consuming game, the server starting at all confirms `ready()` ran
+and your prompts folder is usable.

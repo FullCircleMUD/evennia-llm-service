@@ -11,8 +11,9 @@ service code, install the library, and the game still works.
 
 Four deviations were agreed, each because the thing belongs to someone better placed to do it:
 
-- **The prompts directory.** The substrate resolved it from its own `__file__`, which points inside
-  the library once moved. The library owns a fixed location under the gamedir instead.
+- **The prompts folder.** The substrate resolved it from its own `__file__`, which points inside the
+  library once moved. The consumer declares it as `LLM_PROMPT_FOLDER_PATH` instead, and the library
+  creates nothing — templates are the game's, so the folder holding them is too.
 - **`create_embedding`.** `evennia-ai-memory` owns embedding end to end — its own settings, client and
   error taxonomy — so there is no caller for one here.
 - **Rate limiting and the daily cost cap.** Enforced on the provider's API key, where the limit

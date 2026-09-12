@@ -21,13 +21,13 @@ Defaults live here rather than in the consumer's settings, so a game that
 declares nothing still runs.
 """
 
+from .config import (
+    get_api_base_url,
+    get_api_key,
+    get_default_model,
+    get_enabled,
+)
 from .log import llm_service_log
-
-#: Used when neither the caller nor the consumer names a model.
-DEFAULT_MODEL = "openai/gpt-4o-mini"
-
-#: Used when the consumer names no endpoint.
-DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class LLMService:
@@ -58,12 +58,10 @@ class LLMService:
             str: the assistant's response text, or None if disabled or
                 the call failed.
         """
-        from django.conf import settings
-
-        if not getattr(settings, "LLM_ENABLED", True):
+        if not get_enabled():
             return None
 
-        model = model or getattr(settings, "LLM_DEFAULT_MODEL", DEFAULT_MODEL)
+        model = model or get_default_model()
 
         try:
             client = cls._get_client()
@@ -88,11 +86,10 @@ class LLMService:
     def _get_client(cls):
         """Lazy-init the completion client."""
         if cls._client is None:
-            from django.conf import settings
             from openai import OpenAI
 
             cls._client = OpenAI(
-                base_url=getattr(settings, "LLM_API_BASE_URL", DEFAULT_BASE_URL),
-                api_key=getattr(settings, "LLM_API_KEY", ""),
+                base_url=get_api_base_url(),
+                api_key=get_api_key(),
             )
         return cls._client

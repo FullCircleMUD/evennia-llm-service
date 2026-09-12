@@ -2,7 +2,30 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-08-31 (latest)
+## 2026-09-12 (latest)
+
+- **Settings moved behind `config.py`, and the prompts folder became the consumer's.** Five settings,
+  five named accessors, and `XC-09` asserting statically that no other module reads
+  `django.conf.settings`. `LLM_PROMPT_FOLDER_PATH` is required: the library ships no prompt text, so
+  there is no folder it could pick, and `check_settings()` refuses the boot from `AppConfig.ready()`
+  when the setting is missing or names something that is not a folder. `ensure_prompts_dir()` is gone
+  — the library creates nothing. 67 tests, all green.
+
+  Live-tested in the demo gamedir: all three refusals verified at a real `evennia start` with no
+  process left running, then a clean boot, `get_prompt_folder_path()` resolving through the live
+  accessor, `render_prompt("test_npc.md", …)` returning a filled template, and a missing template
+  logging its WARN to `llm_service.log`.
+
+- **Logging converted to `evennia-logging-extension`.** `log.py` binds `llm_service_log` from
+  `make_logger("llm_service.log")` — same name, same file, same signature, so no call site moved.
+  Validated live: the boot line landed once per process in Evennia's format, `WARN` and `ERROR` came
+  through at their level, `trace=True` appended the active exception, and no `pre-startup.log`
+  appeared.
+
+  `ready()` no longer logs, because it no longer creates anything. Extending logging into the
+  pre-reactor window is phase two and has not been done.
+
+## 2026-08-31
 
 - **Live-tested in a running Evennia game.** A demo gamedir at `examples/demo-game/` installed the
   library, booted, and made a real call to OpenRouter that came back in character. Everything the unit

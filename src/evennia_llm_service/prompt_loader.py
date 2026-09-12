@@ -3,9 +3,10 @@
 
 Stage one: lifted from FullCircleMUD's ``src/game/llm/prompt_loader.py``
 with one approved change. The original resolved its prompts directory from
-its own ``__file__``, which would point inside this package once moved. The
-library instead owns a fixed expected location under the consumer's game
-directory, overridable by ``LLM_PROMPTS_DIR``.
+its own ``__file__``, which would point inside this package once moved.
+Templates are the consumer's, so the folder holding them is the consumer's
+too — named by ``LLM_PROMPT_FOLDER_PATH`` and read through
+``config.get_prompt_folder_path()``.
 
 Templates use ``str.format_map()`` with named placeholders. Files are
 cached in memory after first load.
@@ -16,51 +17,20 @@ See docs/test-plan.md for the behaviour this reproduces.
 import os
 from functools import lru_cache
 
+from .config import get_prompt_folder_path
 from .log import llm_service_log
-
-# Location under GAME_DIR when LLM_PROMPTS_DIR is not set.
-DEFAULT_PROMPTS_SUBPATH = ("llm_service", "prompts")
-
-
-def get_prompts_dir():
-    """Return the directory prompt templates are loaded from.
-
-    ``LLM_PROMPTS_DIR`` if the consumer set it, otherwise
-    ``<GAME_DIR>/llm_service/prompts``.
-    """
-    from django.conf import settings
-
-    configured = getattr(settings, "LLM_PROMPTS_DIR", None)
-    if configured:
-        return str(configured)
-    return os.path.join(settings.GAME_DIR, *DEFAULT_PROMPTS_SUBPATH)
-
-
-def ensure_prompts_dir():
-    """Create the prompts directory if it does not exist.
-
-    Leaves an existing directory and its contents untouched.
-
-    Returns:
-        bool: True if it had to be created, False if it was already there.
-    """
-    path = get_prompts_dir()
-    if os.path.isdir(path):
-        return False
-    os.makedirs(path, exist_ok=True)
-    return True
 
 
 @lru_cache(maxsize=32)
 def load_prompt(filename):
-    """Load a prompt template from the prompts directory.
+    """Load a prompt template from the consumer's prompts folder.
 
     Cached after first read.
 
     Returns:
         str: the raw template text, or None if the file is not found.
     """
-    path = os.path.join(get_prompts_dir(), filename)
+    path = os.path.join(get_prompt_folder_path(), filename)
     if not os.path.exists(path):
         llm_service_log(f"prompt file not found: {path}", level="WARN")
         return None

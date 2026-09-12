@@ -28,6 +28,12 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # Library under test
 INSTALLED_APPS = list(INSTALLED_APPS) + ["evennia_llm_service"]  # noqa: F405
 
+# The library refuses to boot without a prompts folder, so the suite declares
+# one for AppConfig.ready(). Tests that care about the value override it with
+# a temporary directory of their own; this one only has to exist.
+LLM_PROMPT_FOLDER_PATH = os.path.join(tempfile.gettempdir(), "evennia_llm_service_test_prompts")
+os.makedirs(LLM_PROMPT_FOLDER_PATH, exist_ok=True)
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

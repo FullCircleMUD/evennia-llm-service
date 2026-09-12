@@ -22,8 +22,9 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 
 ## Project status
 
-**Stage one complete.** `LLMService.chat_completion` and the prompt loader are implemented and covered
-— 53 cases, all green. The library has not yet been installed into FCM.
+**Stage one complete.** `LLMService.chat_completion`, the prompt loader, the settings accessors and the
+boot check are implemented and covered — 67 cases, all green, and live-tested in the demo gamedir. The
+library has not yet been installed into FCM.
 
 For what each stage covers and what is decided but not built, read [docs/stages.md](docs/stages.md).
 For the running milestone log, read [docs/progress.md](docs/progress.md).
@@ -34,7 +35,7 @@ For the running milestone log, read [docs/progress.md](docs/progress.md).
 2. [docs/stages.md](docs/stages.md) — what is in this stage, what is deferred, and why.
 3. [docs/test-plan.md](docs/test-plan.md) — every behaviour the library commits to, and the test
    covering it. The scope section lists each deviation from the substrate.
-4. [docs/installation.md](docs/installation.md) — settings, `INSTALLED_APPS`, prompts, logging.
+4. [docs/installing.md](docs/installing.md) — settings, `INSTALLED_APPS`, prompts, logging.
 
 ## Load-bearing architectural principles
 
@@ -43,8 +44,10 @@ For the running milestone log, read [docs/progress.md](docs/progress.md).
 2. **No FCM-specific assumptions.** This library is extracted from FullCircleMUD (FCM). FCM prompt
    content, NPC names, zone vocabularies and typeclass names all stay in FCM. Default to "consumer
    concern" when uncertain. `XC-03` asserts it statically.
-3. **The library ships no prompt text.** Templates are the game's. The library owns the directory they
-   live in and the mechanism that renders them, and nothing about what they say.
+3. **The library ships no prompt text, and owns no folder.** Templates are the game's, so the folder
+   holding them is too — `LLM_PROMPT_FOLDER_PATH` names it, the consumer makes it, and the library
+   creates nothing. It owns the mechanism that renders a template and nothing about what it says.
+   `check_settings()` refuses a boot without a usable folder; the `CF` block covers it.
 4. **Do not enforce what the provider enforces better.** Spend caps and rate limits go on the API key,
    where they apply to actual spend rather than to one process. A limit the library holds is one that
    multiplies by however many processes the consumer runs. `XC-02` and the retired `RL`/`DC`/`CT`
@@ -59,6 +62,12 @@ For the running milestone log, read [docs/progress.md](docs/progress.md).
    lookup, a prompt render and the completion in *one* `deferToThread` — a library that deferred
    internally would force a hop inside a hop and make the siblings awkward to compose. `XC-08` asserts
    that nothing in the package imports Twisted.
+8. **Test-first.** Cases are agreed in [docs/test-plan.md](docs/test-plan.md) before a test is written,
+   and the implementation is written to pass them. Every test traces to a case ID, and the
+   `library-standards-linter` enforces both directions.
+9. **Every setting is read through `config.py`.** One named accessor per setting, with its default
+   beside it, and no other module touches `django.conf.settings`. `XC-09` asserts it statically — it is
+   what stops a second name appearing for a setting that already has one.
 
 ## Out of scope
 
@@ -73,9 +82,6 @@ Decided as questions arise. Rulings so far:
 
 ## Working conventions
 
-- **Test-first.** Cases are agreed in [docs/test-plan.md](docs/test-plan.md) before a test is written,
-  and the implementation is written to pass them. Every test traces to a case ID; the
-  `library-standards-linter` enforces both directions.
 - **Editing design docs.** Update or add design documents whenever an architectural decision is made
   or refined. Capture the *why*, not just the *what*. Index new docs in [docs/INDEX.md](docs/INDEX.md).
 - **Don't put implementation detail in this file or README.** Link out to `docs/` instead.
@@ -110,25 +116,29 @@ evennia-llm-service/
 ├── pyproject.toml
 ├── runtests.py                # standalone test runner (no consumer gamedir needed)
 ├── docs/                      # design wiki (humans + LLMs)
+├── examples/
+│   └── demo-game/             # demo gamedir for live testing
 ├── src/
 │   └── evennia_llm_service/   # library code (src layout)
 │       ├── __init__.py        # the public surface
-│       ├── apps.py            # AppConfig — ready() settles the prompts directory
-│       ├── log.py             # logging shim → llm_service.log
+│       ├── apps.py            # AppConfig — ready() runs the boot check
+│       ├── config.py          # settings, their accessors, check_settings()
+│       ├── log.py             # binds llm_service_log → llm_service.log
 │       ├── service.py         # LLMService.chat_completion
-│       ├── prompt_loader.py   # the prompts directory, loading, rendering, cache
+│       ├── prompt_loader.py   # loading, rendering, cache
 │       └── tests.py           # unit tests (run via runtests.py)
 └── tests/                     # standalone test settings (test_settings.py, urls.py)
 ```
 
-No `examples/` (nothing to demonstrate that the suite does not cover) and no `contrib/` (nothing opt-in
-exists yet; the standards forbid scaffolding one empty).
+No `contrib/` — nothing opt-in exists yet, and the standards forbid scaffolding one empty.
 
 ## Tools and environment
 
 - Python 3.10+ (pinned via `pyproject.toml`).
-- Runtime dependencies: `evennia` and `openai`. The client is OpenAI-compatible, so the provider is
-  whatever `LLM_API_BASE_URL` points at — OpenRouter by default.
+- Runtime dependencies: `evennia`, `evennia-logging-extension` and `openai`. The client is
+  OpenAI-compatible, so the provider is whatever `LLM_API_BASE_URL` points at — OpenRouter by default.
+  The logging extension is not on PyPI; install the checkout by path into every venv that runs the
+  library, including `examples/venv/`.
 - Tests run through Django's test runner via `python runtests.py` — not pytest. No gamedir required.
 - The provider is faked by assigning `LLMService._client`; the class caches it, so no production code
   changes for testability.
