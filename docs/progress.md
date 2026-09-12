@@ -103,7 +103,5 @@ Running log of milestones with links to evidence. Reverse chronological — newe
   `evennia-message-bus`.
 
 - **Extraction scope agreed.** The library takes FCM's `src/game/llm/` in stages. Stage one is a
-  lift-and-shift of `service.py` and `prompt_loader.py`, complete when FCM can delete its LLM service
-  code, install the library, and the game still works. `LLMMixin` and `name_generator.py` stay in FCM
-  — the mixin until stage two, the name generator permanently, being a crafting feature rather than
-  infrastructure.
+  lift-and-shift of `service.py` and `prompt_loader.py`. `LLMMixin` follows in stage two;
+  `name_generator.py` does not follow at all, being a crafting feature rather than infrastructure.

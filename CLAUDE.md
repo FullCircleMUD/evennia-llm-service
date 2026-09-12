@@ -24,7 +24,8 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 
 **Stage one complete.** `LLMService.chat_completion`, the prompt loader, the settings accessors, the
 boot check and the diagnostic logging are implemented and covered — 89 cases, all green, and
-live-tested in the demo gamedir. The library has not yet been installed into FCM.
+live-tested in the demo gamedir. No consumer game uses it yet — FCM's game code is being rebuilt once
+the libraries are ready, and the rebuilt game is what will consume this one.
 
 For what each stage covers and what is decided but not built, read [docs/stages.md](docs/stages.md).
 For the running milestone log, read [docs/progress.md](docs/progress.md).
@@ -42,7 +43,7 @@ For the running milestone log, read [docs/progress.md](docs/progress.md).
 1. **The library does not own game concepts.** NPCs, rooms, factions, quests and the words a character
    says belong to the consumer game. This library provides the call.
 2. **No FCM-specific assumptions.** This library is extracted from FullCircleMUD (FCM). FCM prompt
-   content, NPC names, zone vocabularies and typeclass names all stay in FCM. Default to "consumer
+   content, NPC names, zone vocabularies and typeclass names are all the game's. Default to "consumer
    concern" when uncertain. `XC-03` asserts it statically.
 3. **The library ships no prompt text, and owns no folder.** Templates are the game's, so the folder
    holding them is too — `LLM_PROMPT_FOLDER_PATH` names it, the consumer makes it, and the library

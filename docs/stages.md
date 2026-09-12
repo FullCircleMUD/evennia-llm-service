@@ -1,13 +1,18 @@
 # Stages
 
-The library is being extracted from FullCircleMUD in stages. This records what each stage covers and
-what was decided for the later ones, so a decision reached in conversation is not lost between them.
+FullCircleMUD's `src/game/llm/` is the source material this library was built from. This records what
+each stage covers and what was decided for the later ones, so a decision reached in conversation is
+not lost between them.
+
+**The library is not being installed into the existing game.** FCM's game code is being rebuilt once
+the libraries are ready, and the rebuilt game is what consumes this one. So a stage is complete when
+the library stands on its own — covered, documented, and behaving — not when a running game has
+adopted it.
 
 ## Stage one — the lift (complete)
 
-Take `src/game/llm/service.py` and `prompt_loader.py` out of FCM and into the library, keeping the
-same settings, method names, signatures and return values. Complete when FCM can delete its LLM
-service code, install the library, and the game still works.
+Take `src/game/llm/service.py` and `prompt_loader.py` as the starting point, keeping the same method
+names, signatures and return values except where a deviation was agreed below.
 
 Four deviations were agreed, each because the thing belongs to someone better placed to do it:
 
@@ -22,19 +27,20 @@ Four deviations were agreed, each because the thing belongs to someone better pl
 - **Cost tracking.** It existed to feed the cap, had no caller in FCM, and estimated from five
   hardcoded prices.
 
-Per-NPC throttling stays a game rule: FCM's mixin already does it with `llm_cooldown_seconds` before
-it ever reaches the service.
+Per-NPC throttling stays a game rule. FCM's mixin does it with `llm_cooldown_seconds` before the call
+ever reaches the service, and a game's mixin is where it belongs.
 
 ## Stage two — the mixin
 
-`LLMMixin` moves out of FCM. It is 1,049 lines and most of it is game behaviour, not infrastructure —
+The library gains the thin mixin a game's NPC sits on. FCM's `LLMMixin` is the source material and
+shows where the line falls: it is 1,049 lines and most of it is game behaviour, not infrastructure —
 of its 24 per-NPC attributes, roughly six are the library's (model, max tokens, temperature, prompt
-file, cooldown, enabled) and the rest are FCM's: `llm_speech_mode`, `llm_engagement_timeout`,
+file, cooldown, enabled) and the rest are the game's: `llm_speech_mode`, `llm_engagement_timeout`,
 `llm_thinking_emote`, `llm_snub_socials`, `llm_snub_comments`, `llm_blind_challenges` and the five
 `llm_hook_*` switches.
 
-So the library's mixin is not this file relocated. It is the thin part underneath, with FCM's mixin
-sitting on top and keeping the behaviour.
+So the library's mixin is not that file relocated. It is the thin part underneath, with the game's own
+mixin sitting on top and keeping the behaviour.
 
 `[TBD — needs discussion: whether the mixin ships in `contrib/` or in core. Proposed as contrib, on
 the grounds that core stays ignorant of Evennia objects and a game whose NPCs work differently ignores

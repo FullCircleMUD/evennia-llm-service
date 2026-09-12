@@ -10,8 +10,9 @@ Case IDs are stable and referenceable. Do not renumber; retire an ID rather than
 ## Scope — stage one
 
 Stage one lifts FCM's `src/game/llm/` into this library with one approved change, recorded below:
-same method names, same signatures, same return values. Completion is reached when FCM can delete its
-LLM service code, install this library, and the game still works.
+same method names, same signatures, same return values. FCM's code is the source material, not a
+destination — the game is being rebuilt once the libraries are ready, and the rebuilt game is what
+consumes this one.
 
 These cases therefore describe **what the code does today**, not what it should do. Where current
 behaviour is questionable — a bare `except` that returns `None`, a render failure that returns the
@@ -36,8 +37,8 @@ In scope: `service.py`, `prompt_loader.py`, `config.py` and `apps.py`.
 method has no future caller. The `CE` block and the second-client cases are retired, along with
 `LLM_EMBEDDING_API_KEY`, `LLM_EMBEDDING_API_BASE_URL` and `LLM_EMBEDDING_MODEL`.
 
-Out of scope for stage one, and deliberately absent from this plan: `LLMMixin` (stays in FCM),
-`name_generator.py` (a crafting feature, stays in FCM), and every redesign discussed but not yet
+Out of scope for stage one, and deliberately absent from this plan: `LLMMixin` (stage two),
+`name_generator.py` (a crafting feature, never the library's), and every redesign discussed but not yet
 scheduled — the single exception type, the library's own log file, prompt `defaults` blocks, the
 prompt validator, memory integration, and Django wiring.
 
