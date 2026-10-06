@@ -9,12 +9,13 @@ the library is committed to reproducing.
 
 from .config import get_prompt_folder_path
 from .prompt_loader import clear_cache, load_prompt, render_prompt
-from .service import LLMService
+from .service import LLMService, ToolChoice
 
 __version__ = "0.0.1"
 
 __all__ = [
     "LLMService",
+    "ToolChoice",
     "clear_cache",
     "get_prompt_folder_path",
     "load_prompt",

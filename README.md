@@ -10,7 +10,7 @@ somewhere else.
 ## Status
 
 **Stage one complete.** The provider call, the prompt loader and the settings layer are implemented,
-with 89 tests covering them and a live test in the demo gamedir. Not yet published, and not yet
+with 99 tests covering them and a live test in the demo gamedir. Not yet published, and not yet
 installed into a consuming game. See
 [docs/progress.md](https://github.com/FullCircleMUD/evennia-llm-service/blob/main/docs/progress.md).
 
@@ -19,6 +19,7 @@ installed into a consuming game. See
 | Surface | What it gives you |
 |---|---|
 | `LLMService.chat_completion` | One synchronous call to any OpenAI-compatible provider. Returns the reply, or `None` with the reason in the log. |
+| `LLMService.choose_tool` | The same call, answered by choosing one of the tools you offer. Returns a `ToolChoice` — the tool's name and its parsed arguments — or `None` with the reason in the log. |
 | `render_prompt` | Loads a template from your game's prompts folder and fills in its placeholders. |
 | `load_prompt` / `clear_cache` | The raw template, cached; and the flush when you have edited one. |
 | `get_prompt_folder_path` | The folder your templates live in, as the library resolved it. |

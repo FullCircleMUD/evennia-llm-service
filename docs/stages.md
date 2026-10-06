@@ -30,6 +30,15 @@ Four deviations were agreed, each because the thing belongs to someone better pl
 Per-NPC throttling stays a game rule. FCM's mixin does it with `llm_cooldown_seconds` before the call
 ever reaches the service, and a game's mixin is where it belongs.
 
+## Tool calling (built)
+
+`LLMService.choose_tool` sits beside `chat_completion`, which is unchanged. The caller offers tools in the
+OpenAI tool format and the request requires one to be chosen; the answer is a `ToolChoice` — the tool's
+name and its arguments, parsed into a dict. It is for a consumer that wants a decision rather than prose:
+an NPC choosing what to do from the actions it has. The library knows nothing of what the tools mean.
+It follows `chat_completion`'s contract: `None` on any failure, with the reason in the log. The cases are
+`TC` in [test-plan.md](test-plan.md).
+
 ## Stage two — the mixin
 
 The library gains the thin mixin a game's NPC sits on. FCM's `LLMMixin` is the source material and

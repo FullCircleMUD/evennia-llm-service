@@ -7,6 +7,7 @@ Stage one: these cover the behaviour lifted from FullCircleMUD's
 
 import ast
 import contextlib
+import dataclasses
 import os
 import shutil
 import tempfile
@@ -25,7 +26,7 @@ from evennia_llm_service.config import (
     SETTING_PROMPT_FOLDER_PATH,
     check_settings,
 )
-from evennia_llm_service.service import LLMService
+from evennia_llm_service.service import LLMService, ToolChoice
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -487,6 +488,132 @@ class ChatCompletionTests(ServiceCase):
 
 
 # ── CL — client construction ──────────────────────────────────────────
+
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "say",
+            "description": "Say something aloud.",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stay_silent",
+            "description": "Say nothing.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+
+def make_tool_response(*calls):
+    """A response choosing `calls`, each a `(name, arguments_json)` pair."""
+    tool_calls = [
+        SimpleNamespace(type="function", function=SimpleNamespace(name=name, arguments=arguments))
+        for name, arguments in calls
+    ]
+    message = SimpleNamespace(content=None, tool_calls=tool_calls or None)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+
+
+class ChooseToolTests(ServiceCase):
+    def test_tc_01_returns_the_chosen_tool_and_its_arguments(self):
+        self.install_client(make_tool_response(("say", '{"text": "Well met."}')))
+        self.assertEqual(
+            LLMService.choose_tool(MESSAGES, TOOLS), ToolChoice("say", {"text": "Well met."})
+        )
+
+    def test_tc_02_messages_and_tools_reach_the_provider_with_a_tool_required(self):
+        client = self.install_client(make_tool_response(("stay_silent", "{}")))
+        LLMService.choose_tool(MESSAGES, TOOLS)
+        call = client.calls[0]
+        self.assertEqual(call["messages"], MESSAGES)
+        self.assertEqual(call["tools"], TOOLS)
+        self.assertEqual(call["tool_choice"], "required")
+
+    @override_settings(LLM_ENABLED=False)
+    def test_tc_03_disabled_returns_none_without_client(self):
+        client = self.install_client(make_tool_response(("stay_silent", "{}")))
+        self.assertIsNone(LLMService.choose_tool(MESSAGES, TOOLS))
+        self.assertEqual(client.calls, [])
+
+    @override_settings(LLM_DEFAULT_MODEL="anthropic/claude-haiku")
+    def test_tc_04_model_tokens_and_temperature_work_as_for_chat_completion(self):
+        client = self.install_client(make_tool_response(("stay_silent", "{}")))
+        LLMService.choose_tool(MESSAGES, TOOLS)
+        LLMService.choose_tool(
+            MESSAGES, TOOLS, model="openai/gpt-4o", max_tokens=40, temperature=0.2
+        )
+        defaults, given = client.calls
+        self.assertEqual(
+            (defaults["model"], defaults["max_tokens"], defaults["temperature"]),
+            ("anthropic/claude-haiku", 150, 0.8),
+        )
+        self.assertEqual(
+            (given["model"], given["max_tokens"], given["temperature"]),
+            ("openai/gpt-4o", 40, 0.2),
+        )
+
+    def test_tc_05_a_provider_exception_returns_none_logged_at_error(self):
+        self.install_client(exc=RuntimeError("boom"))
+        with mock.patch.object(service, "llm_service_log") as log:
+            self.assertIsNone(LLMService.choose_tool(MESSAGES, TOOLS, npc_key="npc#7"))
+        logged = " ".join(str(c) for c in log.call_args_list)
+        self.assertIn("ERROR", logged)
+        self.assertIn("npc#7", logged)
+
+    def test_tc_06_no_tool_chosen_returns_none_logged_at_warn(self):
+        self.install_client(make_tool_response())
+        with mock.patch.object(service, "llm_service_log") as log:
+            self.assertIsNone(
+                LLMService.choose_tool(MESSAGES, TOOLS, model="openai/gpt-4o", npc_key="npc#7")
+            )
+        logged = " ".join(str(c) for c in log.call_args_list)
+        self.assertIn("WARN", logged)
+        self.assertIn("openai/gpt-4o", logged)
+        self.assertIn("npc#7", logged)
+
+    def test_tc_07_a_tool_not_offered_returns_none_logged_at_warn(self):
+        self.install_client(make_tool_response(("fly_away", "{}")))
+        with mock.patch.object(service, "llm_service_log") as log:
+            self.assertIsNone(LLMService.choose_tool(MESSAGES, TOOLS))
+        logged = " ".join(str(c) for c in log.call_args_list)
+        self.assertIn("WARN", logged)
+        self.assertIn("fly_away", logged)
+
+    def test_tc_08_arguments_that_are_not_a_json_object_return_none(self):
+        for arguments in ("{not json", '["a", "list"]'):
+            with self.subTest(arguments=arguments):
+                self.install_client(make_tool_response(("say", arguments)))
+                with mock.patch.object(service, "llm_service_log") as log:
+                    self.assertIsNone(LLMService.choose_tool(MESSAGES, TOOLS))
+                logged = " ".join(str(c) for c in log.call_args_list)
+                self.assertIn("WARN", logged)
+                self.assertIn("say", logged)
+
+    def test_tc_09_several_tools_chosen_returns_the_first(self):
+        self.install_client(
+            make_tool_response(("say", '{"text": "First."}'), ("stay_silent", "{}"))
+        )
+        self.assertEqual(
+            LLMService.choose_tool(MESSAGES, TOOLS), ToolChoice("say", {"text": "First."})
+        )
+
+    def test_tc_10_tool_choice_is_exported_and_frozen(self):
+        import evennia_llm_service
+
+        self.assertIs(evennia_llm_service.ToolChoice, ToolChoice)
+        self.assertIn("ToolChoice", evennia_llm_service.__all__)
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            ToolChoice("say", {}).name = "shout"
 
 
 class ClientConstructionTests(ServiceCase):

@@ -65,6 +65,7 @@ them patch them out to test their callers. This suite is the first coverage of t
 |---|---|
 | `CF` | The settings accessors and the boot check |
 | `CC` | `chat_completion` |
+| `TC` | `choose_tool` — a completion that must answer by choosing one of the caller's tools |
 | `CL` | Provider client construction |
 | `PD` | The prompts folder |
 | `PL` | `load_prompt` and the cache |
@@ -151,6 +152,33 @@ handled where it is noticed — `PL-03` covers it.
 | CC-20 | A response whose content is `None` logs a WARN naming the model and the npc key — the provider answered, but with nothing usable, and nothing else in the library would say so | `ChatCompletionTests.test_cc_20_none_content_logs_warning` |
 | CC-21 | It still returns `None`. The caller's action is unchanged; only the log is new | `ChatCompletionTests.test_cc_21_none_content_returns_none` |
 | CC-22 | A response whose content is empty or only whitespace is treated the same way — an empty reply is a non-reply, as an empty template is a non-prompt | `ChatCompletionTests.test_cc_22_empty_content_treated_as_no_reply` |
+
+## TC — `choose_tool`
+
+`choose_tool(messages, tools, model=None, max_tokens=150, temperature=0.8, npc_key=None)`
+
+A completion that must answer by choosing one of the tools the caller offers, for a consumer that wants
+a decision rather than prose. `tools` is a list in the OpenAI tool format — each a name, a description
+and a JSON schema for its arguments — and the request carries `tool_choice="required"`. The answer is a
+`ToolChoice(name, arguments)`, frozen, with `arguments` parsed from the call's JSON into a dict.
+
+Added beside `chat_completion`, which is unchanged. Like it, every failure returns `None` with the reason
+in the log: the call failing is an ERROR; an answer that cannot be used — no tool chosen, a tool not
+offered, arguments that are not a JSON object — is a WARN, as an empty reply is for `chat_completion`.
+The library knows nothing of what the tools mean.
+
+| ID | Case | Test function |
+|---|---|---|
+| TC-01 | A response choosing a tool returns `ToolChoice(name, arguments)`, the arguments parsed from the call's JSON into a dict | `ChooseToolTests.test_tc_01_returns_the_chosen_tool_and_its_arguments` |
+| TC-02 | `messages` and `tools` reach the provider unchanged, with `tool_choice="required"` | `ChooseToolTests.test_tc_02_messages_and_tools_reach_the_provider_with_a_tool_required` |
+| TC-03 | With `LLM_ENABLED` false, returns `None` without building a client | `ChooseToolTests.test_tc_03_disabled_returns_none_without_client` |
+| TC-04 | `model`, `max_tokens` and `temperature` reach the provider as they do for `chat_completion`, with the same defaults | `ChooseToolTests.test_tc_04_model_tokens_and_temperature_work_as_for_chat_completion` |
+| TC-05 | A provider exception returns `None`, logged at ERROR with the npc key | `ChooseToolTests.test_tc_05_a_provider_exception_returns_none_logged_at_error` |
+| TC-06 | A response choosing no tool returns `None`, logged at WARN naming the model and the npc key | `ChooseToolTests.test_tc_06_no_tool_chosen_returns_none_logged_at_warn` |
+| TC-07 | A response choosing a tool that was not offered returns `None`, logged at WARN naming the tool | `ChooseToolTests.test_tc_07_a_tool_not_offered_returns_none_logged_at_warn` |
+| TC-08 | Arguments that are not valid JSON, or not a JSON object, return `None`, logged at WARN naming the tool | `ChooseToolTests.test_tc_08_arguments_that_are_not_a_json_object_return_none` |
+| TC-09 | A response choosing several tools returns the first | `ChooseToolTests.test_tc_09_several_tools_chosen_returns_the_first` |
+| TC-10 | `ToolChoice` is exported from the package root, and cannot be changed once made | `ChooseToolTests.test_tc_10_tool_choice_is_exported_and_frozen` |
 
 ## CL — client construction
 
