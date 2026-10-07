@@ -22,7 +22,7 @@ from django.test import SimpleTestCase, override_settings
 import evennia_llm_service
 from evennia_llm_service import apps, config, log, prompt_loader, service
 from evennia_llm_service.config import (
-    DEFAULT_MODEL,
+    DEFAULT_MODEL_TIERS,
     SETTING_PROMPT_FOLDER_PATH,
     check_settings,
 )
@@ -69,6 +69,29 @@ class FakeClient:
     @property
     def calls(self):
         return self.completions.calls
+
+
+class SequenceClient(FakeClient):
+    """A completion client answering each call with the next of ``answers``.
+
+    An answer that is an exception is raised; anything else is returned.
+    """
+
+    def __init__(self, *answers):
+        super().__init__()
+        self._answers = list(answers)
+        self.completions.create = self._create
+
+    def _create(self, **kwargs):
+        self.completions.calls.append(kwargs)
+        answer = self._answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    @property
+    def models(self):
+        return [call["model"] for call in self.calls]
 
 
 class RaisingClient(FakeClient):
@@ -328,6 +351,25 @@ class CheckSettingsTests(SimpleTestCase):
         self.assertIn(str(caught.exception), written)
         self.assertIn("[ERROR]", written)
 
+    def test_cf_33_unusable_model_tiers_refuse_boot(self):
+        """CF-33"""
+        for bad in ([], (), "openai/gpt-4o-mini", ["cheap/model", ""], ["cheap/model", 3]):
+            with self.subTest(tiers=bad):
+                with folder(self.dir), override_settings(LLM_ENABLED=True, LLM_MODEL_TIERS=bad):
+                    with self.assertRaises(ImproperlyConfigured) as caught:
+                        check_settings()
+                self.assertIn("LLM_MODEL_TIERS", str(caught.exception))
+
+    def test_cf_34_unusable_model_tiers_log_before_raising(self):
+        """CF-34"""
+        clear_logs()
+        with folder(self.dir), override_settings(LLM_ENABLED=True, LLM_MODEL_TIERS=[]):
+            with self.assertRaises(ImproperlyConfigured) as caught:
+                check_settings()
+        written = read_back_logs()
+        self.assertIn(str(caught.exception), written)
+        self.assertIn("[ERROR]", written)
+
     def test_cf_19_refused_boot_logs_no_start_line(self):
         """CF-19"""
         with folder(None):
@@ -338,7 +380,7 @@ class CheckSettingsTests(SimpleTestCase):
 
 
 class AccessorTests(SimpleTestCase):
-    """CF-08 to CF-16 — every setting reaches the library through config.py."""
+    """CF-08 to CF-14, CF-31 and CF-32 — every setting reaches the library through config.py."""
 
     def assertUndeclared(self, name):
         """Guard the default cases: they only mean something while it is unset."""
@@ -381,15 +423,16 @@ class AccessorTests(SimpleTestCase):
         with override_settings(LLM_API_BASE_URL="https://example.test/v1"):
             self.assertEqual(config.get_api_base_url(), "https://example.test/v1")
 
-    def test_cf_15_default_model_falls_back_to_hardcoded(self):
-        """CF-15"""
-        self.assertUndeclared("LLM_DEFAULT_MODEL")
-        self.assertEqual(config.get_default_model(), DEFAULT_MODEL)
+    def test_cf_31_model_tiers_default_to_the_one_default_model(self):
+        """CF-31"""
+        self.assertUndeclared("LLM_MODEL_TIERS")
+        self.assertEqual(config.get_model_tiers(), DEFAULT_MODEL_TIERS)
+        self.assertEqual(len(DEFAULT_MODEL_TIERS), 1)
 
-    def test_cf_16_default_model_returns_declared_value(self):
-        """CF-16"""
-        with override_settings(LLM_DEFAULT_MODEL="anthropic/claude-haiku"):
-            self.assertEqual(config.get_default_model(), "anthropic/claude-haiku")
+    def test_cf_32_model_tiers_return_the_declared_tiers_in_order(self):
+        """CF-32"""
+        with override_settings(LLM_MODEL_TIERS=["cheap/model", "dear/model"]):
+            self.assertEqual(tuple(config.get_model_tiers()), ("cheap/model", "dear/model"))
 
 
 # ── CC — chat_completion ──────────────────────────────────────────────
@@ -415,23 +458,6 @@ class ChatCompletionTests(ServiceCase):
         self.assertFalse(hasattr(settings, "LLM_ENABLED"))
         self.install_client(make_response())
         self.assertIsNotNone(LLMService.chat_completion(MESSAGES))
-
-    @override_settings(LLM_DEFAULT_MODEL="anthropic/claude-haiku")
-    def test_cc_05_model_from_setting(self):
-        client = self.install_client(make_response())
-        LLMService.chat_completion(MESSAGES)
-        self.assertEqual(client.calls[0]["model"], "anthropic/claude-haiku")
-
-    def test_cc_06_model_falls_back_to_hardcoded_default(self):
-        client = self.install_client(make_response())
-        LLMService.chat_completion(MESSAGES)
-        self.assertEqual(client.calls[0]["model"], "openai/gpt-4o-mini")
-
-    @override_settings(LLM_DEFAULT_MODEL="openai/gpt-4o")
-    def test_cc_07_explicit_model_overrides_setting(self):
-        client = self.install_client(make_response())
-        LLMService.chat_completion(MESSAGES, model="google/gemini-2.0-flash")
-        self.assertEqual(client.calls[0]["model"], "google/gemini-2.0-flash")
 
     def test_cc_08_max_tokens_and_temperature_reach_provider(self):
         client = self.install_client(make_response())
@@ -464,10 +490,11 @@ class ChatCompletionTests(ServiceCase):
         result = LLMService.chat_completion(MESSAGES)
         self.assertIsInstance(result, str)
 
+    @override_settings(LLM_MODEL_TIERS=["openai/gpt-4o"])
     def test_cc_20_none_content_logs_warning(self):
         self.install_client(make_response(None))
         with mock.patch.object(service, "llm_service_log") as log:
-            LLMService.chat_completion(MESSAGES, model="openai/gpt-4o", npc_key="npc#7")
+            LLMService.chat_completion(MESSAGES, npc_key="npc#7")
         logged = " ".join(str(c) for c in log.call_args_list)
         self.assertIn("WARN", logged)
         self.assertIn("openai/gpt-4o", logged)
@@ -545,22 +572,13 @@ class ChooseToolTests(ServiceCase):
         self.assertIsNone(LLMService.choose_tool(MESSAGES, TOOLS))
         self.assertEqual(client.calls, [])
 
-    @override_settings(LLM_DEFAULT_MODEL="anthropic/claude-haiku")
     def test_tc_04_model_tokens_and_temperature_work_as_for_chat_completion(self):
         client = self.install_client(make_tool_response(("stay_silent", "{}")))
         LLMService.choose_tool(MESSAGES, TOOLS)
-        LLMService.choose_tool(
-            MESSAGES, TOOLS, model="openai/gpt-4o", max_tokens=40, temperature=0.2
-        )
+        LLMService.choose_tool(MESSAGES, TOOLS, max_tokens=40, temperature=0.2)
         defaults, given = client.calls
-        self.assertEqual(
-            (defaults["model"], defaults["max_tokens"], defaults["temperature"]),
-            ("anthropic/claude-haiku", 150, 0.8),
-        )
-        self.assertEqual(
-            (given["model"], given["max_tokens"], given["temperature"]),
-            ("openai/gpt-4o", 40, 0.2),
-        )
+        self.assertEqual((defaults["max_tokens"], defaults["temperature"]), (150, 0.8))
+        self.assertEqual((given["max_tokens"], given["temperature"]), (40, 0.2))
 
     def test_tc_05_a_provider_exception_returns_none_logged_at_error(self):
         self.install_client(exc=RuntimeError("boom"))
@@ -570,12 +588,11 @@ class ChooseToolTests(ServiceCase):
         self.assertIn("ERROR", logged)
         self.assertIn("npc#7", logged)
 
+    @override_settings(LLM_MODEL_TIERS=["openai/gpt-4o"])
     def test_tc_06_no_tool_chosen_returns_none_logged_at_warn(self):
         self.install_client(make_tool_response())
         with mock.patch.object(service, "llm_service_log") as log:
-            self.assertIsNone(
-                LLMService.choose_tool(MESSAGES, TOOLS, model="openai/gpt-4o", npc_key="npc#7")
-            )
+            self.assertIsNone(LLMService.choose_tool(MESSAGES, TOOLS, npc_key="npc#7"))
         logged = " ".join(str(c) for c in log.call_args_list)
         self.assertIn("WARN", logged)
         self.assertIn("openai/gpt-4o", logged)
@@ -614,6 +631,134 @@ class ChooseToolTests(ServiceCase):
         self.assertIn("ToolChoice", evennia_llm_service.__all__)
         with self.assertRaises(dataclasses.FrozenInstanceError):
             ToolChoice("say", {}).name = "shout"
+
+
+# ── ES — escalation ───────────────────────────────────────────────────
+
+
+TIERS = ["tier/zero", "tier/one", "tier/two"]
+
+
+@override_settings(LLM_MODEL_TIERS=TIERS)
+class EscalationTests(ServiceCase):
+    """ES — which tier each attempt goes to, and when a call moves up."""
+
+    def install_answers(self, *answers):
+        client = SequenceClient(*answers)
+        LLMService._client = client
+        return client
+
+    def test_es_01_a_call_naming_no_tier_goes_to_tier_zero_once(self):
+        """ES-01"""
+        client = self.install_answers(make_response("ok"))
+        LLMService.chat_completion(MESSAGES)
+        self.assertEqual(client.models, ["tier/zero"])
+
+    def test_es_02_start_tier_names_the_first_attempts_tier(self):
+        """ES-02"""
+        client = self.install_answers(make_response("ok"))
+        LLMService.chat_completion(MESSAGES, start_tier=1)
+        self.assertEqual(client.models, ["tier/one"])
+
+    def test_es_03_with_no_max_an_empty_answer_is_not_retried(self):
+        """ES-03"""
+        client = self.install_answers(make_response(None), make_response("ok"))
+        self.assertIsNone(LLMService.chat_completion(MESSAGES))
+        self.assertEqual(client.models, ["tier/zero"])
+
+    def test_es_04_an_empty_answer_moves_the_same_request_up_a_tier(self):
+        """ES-04"""
+        client = self.install_answers(make_response(None), make_response("ok"))
+        answer = LLMService.chat_completion(
+            MESSAGES, max_tokens=12, temperature=0.9, max_escalation_tier=1
+        )
+        self.assertEqual(answer, "ok")
+        self.assertEqual(client.models, ["tier/zero", "tier/one"])
+        first, second = client.calls
+        self.assertEqual(
+            {k: v for k, v in first.items() if k != "model"},
+            {k: v for k, v in second.items() if k != "model"},
+        )
+
+    def test_es_05_a_provider_exception_moves_up_a_tier(self):
+        """ES-05"""
+        client = self.install_answers(RuntimeError("boom"), make_response("ok"))
+        self.assertEqual(LLMService.chat_completion(MESSAGES, max_escalation_tier=1), "ok")
+        self.assertEqual(client.models, ["tier/zero", "tier/one"])
+
+    def test_es_06_the_first_usable_answer_is_returned(self):
+        """ES-06"""
+        client = self.install_answers(make_response("ok"), make_response("dearer"))
+        self.assertEqual(LLMService.chat_completion(MESSAGES, max_escalation_tier=2), "ok")
+        self.assertEqual(client.models, ["tier/zero"])
+
+    def test_es_07_empty_through_the_max_returns_none(self):
+        """ES-07"""
+        client = self.install_answers(
+            make_response(None), make_response(None), make_response("too far")
+        )
+        self.assertIsNone(LLMService.chat_completion(MESSAGES, max_escalation_tier=1))
+        self.assertEqual(client.models, ["tier/zero", "tier/one"])
+
+    def test_es_08_an_answer_accept_rejects_moves_up_a_tier(self):
+        """ES-08"""
+        client = self.install_answers(make_response("bad"), make_response("good"))
+        answer = LLMService.chat_completion(
+            MESSAGES, max_escalation_tier=1, accept=lambda text: text == "good"
+        )
+        self.assertEqual(answer, "good")
+        self.assertEqual(client.models, ["tier/zero", "tier/one"])
+
+    def test_es_09_an_answer_rejected_at_the_max_returns_none(self):
+        """ES-09"""
+        self.install_answers(make_response("bad"))
+        self.assertIsNone(LLMService.chat_completion(MESSAGES, accept=lambda text: False))
+
+    def test_es_10_accept_is_never_handed_none(self):
+        """ES-10"""
+        seen = []
+        self.install_answers(make_response(None), make_response("ok"))
+        LLMService.chat_completion(
+            MESSAGES, max_escalation_tier=1, accept=lambda answer: seen.append(answer) or True
+        )
+        self.assertEqual(seen, ["ok"])
+
+    def test_es_11_a_max_below_the_start_raises_before_any_call(self):
+        """ES-11"""
+        client = self.install_answers(make_response("ok"))
+        with self.assertRaises(ValueError):
+            LLMService.chat_completion(MESSAGES, start_tier=2, max_escalation_tier=1)
+        self.assertEqual(client.calls, [])
+
+    def test_es_12_a_tier_past_the_last_stops_at_the_last(self):
+        """ES-12"""
+        client = self.install_answers(make_response("ok"))
+        LLMService.chat_completion(MESSAGES, start_tier=9)
+        self.assertEqual(client.models, ["tier/two"])
+
+        client = self.install_answers(
+            make_response(None), make_response(None), make_response(None)
+        )
+        self.assertIsNone(LLMService.chat_completion(MESSAGES, max_escalation_tier=9))
+        self.assertEqual(client.models, TIERS)
+
+    def test_es_13_choose_tool_escalates_by_the_same_rule(self):
+        """ES-13"""
+        client = self.install_answers(
+            make_tool_response(), make_tool_response(("stay_silent", "{}"))
+        )
+        answer = LLMService.choose_tool(MESSAGES, TOOLS, max_escalation_tier=1)
+        self.assertEqual(answer, ToolChoice("stay_silent", {}))
+        self.assertEqual(client.models, ["tier/zero", "tier/one"])
+
+    def test_es_14_choose_tools_accept_is_handed_the_tool_choice(self):
+        """ES-14"""
+        seen = []
+        self.install_answers(make_tool_response(("say", '{"text": "hi"}')))
+        LLMService.choose_tool(
+            MESSAGES, TOOLS, accept=lambda choice: seen.append(choice) or True
+        )
+        self.assertEqual(seen, [ToolChoice("say", {"text": "hi"})])
 
 
 class ClientConstructionTests(ServiceCase):

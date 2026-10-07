@@ -66,6 +66,7 @@ them patch them out to test their callers. This suite is the first coverage of t
 | `CF` | The settings accessors and the boot check |
 | `CC` | `chat_completion` |
 | `TC` | `choose_tool` — a completion that must answer by choosing one of the caller's tools |
+| `ES` | Escalation — which model tier each attempt uses, and when a call moves up a tier |
 | `CL` | Provider client construction |
 | `PD` | The prompts folder |
 | `PL` | `load_prompt` and the cache |
@@ -80,6 +81,7 @@ assigns the fake and clears it afterwards.
 | Fixture | Purpose |
 |---|---|
 | `FakeClient` | Stands in for the OpenAI client; `chat.completions.create` returns a scripted response and records its kwargs |
+| `SequenceClient(*answers)` | A client answering each call with the next answer, raising any that is an exception — what `ES` scripts a climb with |
 | `make_response(content, prompt_tokens, completion_tokens)` | Builds a response shaped like the SDK's, with a `usage` that can be `None` |
 | `RaisingClient` | Raises a chosen exception from `create` |
 | `reset_state()` | Clears the cached client and the template cache between tests |
@@ -113,8 +115,6 @@ handled where it is noticed — `PL-03` covers it.
 | CF-12 | `get_api_key()` returns the consumer's value when declared | `AccessorTests.test_cf_12_api_key_returns_declared_value` |
 | CF-13 | `get_api_base_url()` returns `""` when `LLM_API_BASE_URL` is undeclared — reachable only with the library disabled, since the boot check refuses a blank one while it is on | `AccessorTests.test_cf_13_base_url_defaults_empty` |
 | CF-14 | `get_api_base_url()` returns the consumer's value when declared | `AccessorTests.test_cf_14_base_url_returns_declared_value` |
-| CF-15 | `get_default_model()` returns `openai/gpt-4o-mini` when `LLM_DEFAULT_MODEL` is undeclared | `AccessorTests.test_cf_15_default_model_falls_back_to_hardcoded` |
-| CF-16 | `get_default_model()` returns the consumer's value when declared | `AccessorTests.test_cf_16_default_model_returns_declared_value` |
 | CF-17 | A boot that passes the check logs one INFO line naming the resolved prompts folder — the anchor for "which run was this", and the one place a wrong-but-valid folder shows up | `CheckSettingsTests.test_cf_17_successful_boot_logs_one_line` |
 | CF-18 | That line reports whether `LLM_ENABLED` is on, so a consumer chasing silent NPCs can see it was switched off without reading the settings file | `CheckSettingsTests.test_cf_18_boot_line_reports_enabled_state` |
 | CF-19 | A refused boot logs no start line — the refusal is the message | `CheckSettingsTests.test_cf_19_refused_boot_logs_no_start_line` |
@@ -129,10 +129,17 @@ handled where it is noticed — `PL-03` covers it.
 | CF-28 | A base URL that is not `http`/`https` with a host is refused, naming the value — `openrouter.ai/api/v1` with the scheme missing is the realistic typo | `CheckSettingsTests.test_cf_28_malformed_base_url_refuses_boot` |
 | CF-29 | With `LLM_ENABLED` off, no base URL is needed and the boot passes | `CheckSettingsTests.test_cf_29_disabled_without_base_url_boots` |
 | CF-30 | That refusal logs an ERROR before it raises, carrying the same text | `CheckSettingsTests.test_cf_30_missing_base_url_logs_before_raising` |
+| CF-31 | `get_model_tiers()` returns `("openai/gpt-4o-mini",)` when `LLM_MODEL_TIERS` is undeclared | `AccessorTests.test_cf_31_model_tiers_default_to_the_one_default_model` |
+| CF-32 | `get_model_tiers()` returns the consumer's tiers, in order, when declared | `AccessorTests.test_cf_32_model_tiers_return_the_declared_tiers_in_order` |
+| CF-33 | With `LLM_ENABLED` on, `LLM_MODEL_TIERS` that is empty, not a list or tuple, or holds an entry that is not a non-blank string is refused, naming the setting — a call would have no model to go to | `CheckSettingsTests.test_cf_33_unusable_model_tiers_refuse_boot` |
+| CF-34 | That refusal logs an ERROR before it raises, carrying the same text | `CheckSettingsTests.test_cf_34_unusable_model_tiers_log_before_raising` |
+
+Retired: CF-15 and CF-16 covered `get_default_model()` and `LLM_DEFAULT_MODEL`. The default model is
+tier 0 of `LLM_MODEL_TIERS`; see `ES`.
 
 ## CC — `chat_completion`
 
-`chat_completion(messages, model=None, max_tokens=150, temperature=0.8, npc_key=None)`
+`chat_completion(messages, max_tokens=150, temperature=0.8, npc_key=None, start_tier=0, max_escalation_tier=None, accept=None)`
 
 | ID | Case | Test function |
 |---|---|---|
@@ -140,9 +147,6 @@ handled where it is noticed — `PL-03` covers it.
 | CC-02 | `messages` reaches the provider unchanged | `ChatCompletionTests.test_cc_02_messages_reach_provider_unchanged` |
 | CC-03 | With `LLM_ENABLED` false, returns `None` without building a client | `ChatCompletionTests.test_cc_03_disabled_returns_none_without_client` |
 | CC-04 | With `LLM_ENABLED` unset, the call proceeds — the default is enabled | `ChatCompletionTests.test_cc_04_enabled_by_default` |
-| CC-05 | With no `model` argument, `LLM_DEFAULT_MODEL` is used | `ChatCompletionTests.test_cc_05_model_from_setting` |
-| CC-06 | With neither argument nor setting, `openai/gpt-4o-mini` is used | `ChatCompletionTests.test_cc_06_model_falls_back_to_hardcoded_default` |
-| CC-07 | An explicit `model` argument overrides the setting | `ChatCompletionTests.test_cc_07_explicit_model_overrides_setting` |
 | CC-08 | `max_tokens` and `temperature` reach the provider | `ChatCompletionTests.test_cc_08_max_tokens_and_temperature_reach_provider` |
 | CC-09 | Their defaults are 150 and 0.8 | `ChatCompletionTests.test_cc_09_max_tokens_and_temperature_defaults` |
 | CC-13 | A provider exception returns `None` rather than propagating | `ChatCompletionTests.test_cc_13_provider_exception_returns_none` |
@@ -153,9 +157,12 @@ handled where it is noticed — `PL-03` covers it.
 | CC-21 | It still returns `None`. The caller's action is unchanged; only the log is new | `ChatCompletionTests.test_cc_21_none_content_returns_none` |
 | CC-22 | A response whose content is empty or only whitespace is treated the same way — an empty reply is a non-reply, as an empty template is a non-prompt | `ChatCompletionTests.test_cc_22_empty_content_treated_as_no_reply` |
 
+Retired: CC-05 to CC-07 covered the `model` argument and `LLM_DEFAULT_MODEL`. Which model a call uses
+is its tier; see `ES`.
+
 ## TC — `choose_tool`
 
-`choose_tool(messages, tools, model=None, max_tokens=150, temperature=0.8, npc_key=None)`
+`choose_tool(messages, tools, max_tokens=150, temperature=0.8, npc_key=None, start_tier=0, max_escalation_tier=None, accept=None)`
 
 A completion that must answer by choosing one of the tools the caller offers, for a consumer that wants
 a decision rather than prose. `tools` is a list in the OpenAI tool format — each a name, a description
@@ -172,13 +179,65 @@ The library knows nothing of what the tools mean.
 | TC-01 | A response choosing a tool returns `ToolChoice(name, arguments)`, the arguments parsed from the call's JSON into a dict | `ChooseToolTests.test_tc_01_returns_the_chosen_tool_and_its_arguments` |
 | TC-02 | `messages` and `tools` reach the provider unchanged, with `tool_choice="required"` | `ChooseToolTests.test_tc_02_messages_and_tools_reach_the_provider_with_a_tool_required` |
 | TC-03 | With `LLM_ENABLED` false, returns `None` without building a client | `ChooseToolTests.test_tc_03_disabled_returns_none_without_client` |
-| TC-04 | `model`, `max_tokens` and `temperature` reach the provider as they do for `chat_completion`, with the same defaults | `ChooseToolTests.test_tc_04_model_tokens_and_temperature_work_as_for_chat_completion` |
+| TC-04 | `max_tokens` and `temperature` reach the provider as they do for `chat_completion`, with the same defaults | `ChooseToolTests.test_tc_04_model_tokens_and_temperature_work_as_for_chat_completion` |
 | TC-05 | A provider exception returns `None`, logged at ERROR with the npc key | `ChooseToolTests.test_tc_05_a_provider_exception_returns_none_logged_at_error` |
 | TC-06 | A response choosing no tool returns `None`, logged at WARN naming the model and the npc key | `ChooseToolTests.test_tc_06_no_tool_chosen_returns_none_logged_at_warn` |
 | TC-07 | A response choosing a tool that was not offered returns `None`, logged at WARN naming the tool | `ChooseToolTests.test_tc_07_a_tool_not_offered_returns_none_logged_at_warn` |
 | TC-08 | Arguments that are not valid JSON, or not a JSON object, return `None`, logged at WARN naming the tool | `ChooseToolTests.test_tc_08_arguments_that_are_not_a_json_object_return_none` |
 | TC-09 | A response choosing several tools returns the first | `ChooseToolTests.test_tc_09_several_tools_chosen_returns_the_first` |
 | TC-10 | `ToolChoice` is exported from the package root, and cannot be changed once made | `ChooseToolTests.test_tc_10_tool_choice_is_exported_and_frozen` |
+
+## ES — escalation
+
+`LLM_MODEL_TIERS` is the consumer's models, cheapest first. Tier 0 is the default: a call that names no
+tier goes there and nowhere else.
+
+| Argument | Means | Default |
+|---|---|---|
+| `start_tier` | the tier the first attempt uses | `0` |
+| `max_escalation_tier` | the highest tier the call may move up to | `start_tier` — no escalation |
+| `accept` | `accept(answer) -> bool`, the caller's own test of an answer | every non-`None` answer is usable |
+
+An attempt that comes back `None` — the call failed, or the answer could not be used — moves up one tier
+and sends the same request again. So does an answer `accept` rejects. The call stops at the first usable
+answer, or after `max_escalation_tier`, returning `None`. The answer `accept` sees is what the method would have
+returned: the text for `chat_completion`, the `ToolChoice` for `choose_tool`.
+
+Escalation is opt-in per call, because the cost is per call: a line of NPC conversation stays on tier 0,
+and a rare one-off can pay to climb. Each failed attempt is already logged, naming its model, so the log
+shows every tier a call tried.
+
+A tier past the last one stops at the last one. A game may declare fewer tiers than a caller asks for,
+and the call still works. `max_escalation_tier` below `start_tier` is a caller's mistake, whatever the game
+declared, and raises.
+
+| ID | Case | Test function |
+|---|---|---|
+| ES-01 | A call naming no tier goes to tier 0, once | `EscalationTests.test_es_01_a_call_naming_no_tier_goes_to_tier_zero_once` |
+| ES-02 | `start_tier` names the tier the first attempt goes to | `EscalationTests.test_es_02_start_tier_names_the_first_attempts_tier` |
+| ES-03 | With `max_escalation_tier` left out, an empty answer is not retried — the call returns `None` after one attempt | `EscalationTests.test_es_03_with_no_max_an_empty_answer_is_not_retried` |
+| ES-04 | An empty answer below `max_escalation_tier` sends the same request to the next tier up | `EscalationTests.test_es_04_an_empty_answer_moves_the_same_request_up_a_tier` |
+| ES-05 | A provider exception below `max_escalation_tier` moves up a tier as an empty answer does | `EscalationTests.test_es_05_a_provider_exception_moves_up_a_tier` |
+| ES-06 | The first usable answer is returned, and no tier above it is called | `EscalationTests.test_es_06_the_first_usable_answer_is_returned` |
+| ES-07 | Empty answers through `max_escalation_tier` return `None`, and no tier above it is called | `EscalationTests.test_es_07_empty_through_the_max_returns_none` |
+| ES-08 | An answer `accept` rejects moves up a tier as an empty answer does | `EscalationTests.test_es_08_an_answer_accept_rejects_moves_up_a_tier` |
+| ES-09 | An answer rejected at `max_escalation_tier` returns `None`, not the rejected answer | `EscalationTests.test_es_09_an_answer_rejected_at_the_max_returns_none` |
+| ES-10 | `accept` is never handed `None` | `EscalationTests.test_es_10_accept_is_never_handed_none` |
+| ES-11 | `max_escalation_tier` below `start_tier` raises `ValueError` before any call is made | `EscalationTests.test_es_11_a_max_below_the_start_raises_before_any_call` |
+| ES-12 | A `start_tier` or `max_escalation_tier` past the last tier stops at the last tier | `EscalationTests.test_es_12_a_tier_past_the_last_stops_at_the_last` |
+| ES-13 | `choose_tool` escalates by the same rule — an unusable answer below `max_escalation_tier` moves up a tier | `EscalationTests.test_es_13_choose_tool_escalates_by_the_same_rule` |
+| ES-14 | `choose_tool`'s `accept` is handed the `ToolChoice` | `EscalationTests.test_es_14_choose_tools_accept_is_handed_the_tool_choice` |
+
+What each guards, where it is not obvious:
+
+- **ES-03** is the default that keeps every existing caller on one call. A default `max_escalation_tier` of the
+  last tier would quietly multiply the cost of every NPC line that came back empty.
+- **ES-05** is the second way an attempt fails. A provider exception returns from a different branch
+  than an empty reply, and escalation written against one alone misses the other.
+- **ES-10** is what lets a caller write `accept=lambda choice: choice.arguments["name"]`. Handed `None`,
+  that raises in the middle of the retry.
+- **ES-13 and ES-14** are the second method. One rule, so the `ES` cases run against `chat_completion`
+  and these two show `choose_tool` is wired to it.
 
 ## CL — client construction
 

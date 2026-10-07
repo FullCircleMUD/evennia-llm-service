@@ -72,7 +72,7 @@ Each is read with a default, so declaring none of these still starts.
 | Setting | Default | What it does |
 |---|---|---|
 | `LLM_ENABLED` | `True` | Master switch. False makes every call return `None` without contacting the provider, and neither the key nor the endpoint is needed. |
-| `LLM_DEFAULT_MODEL` | `openai/gpt-4o-mini` | Used when a caller names no model. |
+| `LLM_MODEL_TIERS` | `("openai/gpt-4o-mini",)` | The models a call can use, cheapest first. Tier 0 is where every call starts; a call escalates only as far as its `max_escalation_tier`. Refused at boot, while enabled, if empty or holding anything but model names. |
 
 ### Spending and rate limits
 

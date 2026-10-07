@@ -27,8 +27,8 @@ from dataclasses import dataclass
 from .config import (
     get_api_base_url,
     get_api_key,
-    get_default_model,
     get_enabled,
+    get_model_tiers,
 )
 from .log import llm_service_log
 
@@ -57,10 +57,12 @@ class LLMService:
     def chat_completion(
         cls,
         messages,
-        model=None,
         max_tokens=150,
         temperature=0.8,
         npc_key=None,
+        start_tier=0,
+        max_escalation_tier=None,
+        accept=None,
     ):
         """Send a chat completion request.
 
@@ -70,15 +72,92 @@ class LLMService:
         ``npc_key`` identifies the caller in the log. It carries no
         throttling or accounting.
 
+        ``start_tier``, ``max_escalation_tier`` and ``accept`` choose the model
+        and when to move up a tier — see ``_escalate``.
+
         Returns:
-            str: the assistant's response text, or None if disabled or
-                the call failed.
+            str: the assistant's response text, or None if disabled or no
+                tier gave a usable answer.
         """
+        return cls._escalate(
+            lambda model: cls._complete_once(
+                model, messages, max_tokens, temperature, npc_key
+            ),
+            start_tier,
+            max_escalation_tier,
+            accept,
+        )
+
+    @classmethod
+    def choose_tool(
+        cls,
+        messages,
+        tools,
+        max_tokens=150,
+        temperature=0.8,
+        npc_key=None,
+        start_tier=0,
+        max_escalation_tier=None,
+        accept=None,
+    ):
+        """Send a completion that must answer by choosing one of ``tools``.
+
+        Synchronous, like ``chat_completion``: the caller wraps it in
+        ``deferToThread``. ``tools`` is a list in the OpenAI tool format —
+        each a name, a description and a JSON schema for its arguments.
+        Tiers escalate as for ``chat_completion``; ``accept`` is handed the
+        ``ToolChoice``.
+
+        Returns:
+            ToolChoice: the tool chosen and its arguments, or None if disabled
+                or no tier gave a usable answer.
+        """
+        return cls._escalate(
+            lambda model: cls._choose_once(
+                model, messages, tools, max_tokens, temperature, npc_key
+            ),
+            start_tier,
+            max_escalation_tier,
+            accept,
+        )
+
+    # ── Internal ──────────────────────────────────────────────────────
+
+    @classmethod
+    def _escalate(cls, attempt, start_tier, max_escalation_tier, accept):
+        """Run ``attempt(model)`` from ``start_tier`` up, until one is usable.
+
+        An attempt is unusable when it answers ``None`` or ``accept`` rejects
+        it. ``max_escalation_tier`` is the highest tier tried, and defaults to
+        ``start_tier`` — no escalation. Either past the last tier stops at the
+        last tier, so a caller works against a game that declared fewer.
+
+        Raises:
+            ValueError: ``max_escalation_tier`` is below ``start_tier`` — the
+                caller's mistake, whatever tiers the game declared.
+        """
+        if max_escalation_tier is None:
+            max_escalation_tier = start_tier
+        if max_escalation_tier < start_tier:
+            raise ValueError(
+                f"max_escalation_tier {max_escalation_tier} is below "
+                f"start_tier {start_tier}"
+            )
+
         if not get_enabled():
             return None
 
-        model = model or get_default_model()
+        tiers = get_model_tiers()
+        last = len(tiers) - 1
+        for model in tiers[min(start_tier, last) : min(max_escalation_tier, last) + 1]:
+            answer = attempt(model)
+            if answer is not None and (accept is None or accept(answer)):
+                return answer
+        return None
 
+    @classmethod
+    def _complete_once(cls, model, messages, max_tokens, temperature, npc_key):
+        """One chat completion against ``model``: the text, or None, logged."""
         try:
             client = cls._get_client()
             response = client.chat.completions.create(
@@ -110,28 +189,8 @@ class LLMService:
         return content
 
     @classmethod
-    def choose_tool(
-        cls,
-        messages,
-        tools,
-        model=None,
-        max_tokens=150,
-        temperature=0.8,
-        npc_key=None,
-    ):
-        """Send a completion that must answer by choosing one of ``tools``.
-
-        Synchronous, like ``chat_completion``: the caller wraps it in
-        ``deferToThread``. ``tools`` is a list in the OpenAI tool format —
-        each a name, a description and a JSON schema for its arguments.
-
-        Returns:
-            ToolChoice: the tool chosen and its arguments, or None if disabled,
-                the call failed, or the answer could not be used.
-        """
-        if not get_enabled():
-            return None
-        model = model or get_default_model()
+    def _choose_once(cls, model, messages, tools, max_tokens, temperature, npc_key):
+        """One tool-choosing completion against ``model``: the choice, or None, logged."""
         try:
             client = cls._get_client()
             response = client.chat.completions.create(
@@ -184,8 +243,6 @@ class LLMService:
             return None
 
         return ToolChoice(chosen.name, arguments)
-
-    # ── Internal ──────────────────────────────────────────────────────
 
     @classmethod
     def _get_client(cls):

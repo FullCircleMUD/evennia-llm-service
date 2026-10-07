@@ -39,6 +39,14 @@ an NPC choosing what to do from the actions it has. The library knows nothing of
 It follows `chat_completion`'s contract: `None` on any failure, with the reason in the log. The cases are
 `TC` in [test-plan.md](test-plan.md).
 
+## Model tiers (built)
+
+`LLM_MODEL_TIERS` is the consumer's models, cheapest first; tier 0 is the default. Each call says where
+it starts (`start_tier`) and the highest tier it may climb to (`max_escalation_tier`, default no
+escalation). An empty answer, or one the caller's `accept(answer)` rejects, sends the same request a
+tier up. Escalation is per call because cost is: high-volume calls stay on tier 0, and a rare one can
+pay to climb. The cases are `ES` in [test-plan.md](test-plan.md).
+
 ## Stage two — the mixin
 
 The library gains the thin mixin a game's NPC sits on. FCM's `LLMMixin` is the source material and

@@ -20,6 +20,10 @@ installed into a consuming game. See
 |---|---|
 | `LLMService.chat_completion` | One synchronous call to any OpenAI-compatible provider. Returns the reply, or `None` with the reason in the log. |
 | `LLMService.choose_tool` | The same call, answered by choosing one of the tools you offer. Returns a `ToolChoice` — the tool's name and its parsed arguments — or `None` with the reason in the log. |
+
+Both take `start_tier`, `max_escalation_tier` and `accept`. A call starts on the model at `start_tier` in
+`LLM_MODEL_TIERS`; an empty answer, or one `accept(answer)` rejects, sends the same request a tier up,
+as far as `max_escalation_tier`. Left out, a call uses tier 0 once.
 | `render_prompt` | Loads a template from your game's prompts folder and fills in its placeholders. |
 | `load_prompt` / `clear_cache` | The raw template, cached; and the flush when you have edited one. |
 | `get_prompt_folder_path` | The folder your templates live in, as the library resolved it. |
@@ -28,7 +32,7 @@ Five settings, three of them required. `LLM_PROMPT_FOLDER_PATH` names the folder
 templates and is always required. `LLM_API_KEY` and `LLM_API_BASE_URL` are required while
 `LLM_ENABLED` is on — the library names no provider for you, so which endpoint your credential goes
 to stays your decision. The server refuses to start without them and says why in the log as well as
-on the console. `LLM_ENABLED` and `LLM_DEFAULT_MODEL` are optional.
+on the console. `LLM_ENABLED` and `LLM_MODEL_TIERS` are optional.
 
 ## What it deliberately does not do
 

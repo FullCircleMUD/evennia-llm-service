@@ -5,9 +5,8 @@ Every module-level constant the library declares lives here, and every other
 module imports it from here — one file to check before minting a second name
 for a value that already has one.
 
-Four of the five settings have a library default, so absence is the case the
-default exists for and none of them is checked at boot. The prompts folder is
-the exception: the library ships no prompt text, so there is no folder it
+Four of the five settings have a library default. The prompts folder is the
+exception: the library ships no prompt text, so there is no folder it
 could pick that would be correct. A guessed location is an empty one, and an
 empty one fails silently — every ``render_prompt`` returns ``None``, every NPC
 drops to the consumer's own fallback, and the game runs with every character
@@ -30,10 +29,10 @@ SETTING_PROMPT_FOLDER_PATH = "LLM_PROMPT_FOLDER_PATH"
 SETTING_ENABLED = "LLM_ENABLED"
 SETTING_API_KEY = "LLM_API_KEY"
 SETTING_API_BASE_URL = "LLM_API_BASE_URL"
-SETTING_DEFAULT_MODEL = "LLM_DEFAULT_MODEL"
+SETTING_MODEL_TIERS = "LLM_MODEL_TIERS"
 
-#: Used when neither the caller nor the consumer names a model.
-DEFAULT_MODEL = "openai/gpt-4o-mini"
+#: Used when the consumer declares no tiers: one, which every call goes to.
+DEFAULT_MODEL_TIERS = ("openai/gpt-4o-mini",)
 
 #: No endpoint the library could pick would be right: which provider a game
 #: sends its traffic and its credential to is the consumer's choice. A default
@@ -118,6 +117,18 @@ def check_settings() -> None:
             f"cause, e.g. 'https://openrouter.ai/api/v1'."
         )
 
+    tiers = getattr(settings, SETTING_MODEL_TIERS, DEFAULT_MODEL_TIERS)
+    if (
+        not isinstance(tiers, (list, tuple))
+        or not tiers
+        or any(not isinstance(tier, str) or not tier.strip() for tier in tiers)
+    ):
+        _refuse(
+            f"{SETTING_MODEL_TIERS} is {tiers!r}. It must be a list of model names, "
+            f"cheapest first, e.g. ['openai/gpt-4o-mini', 'anthropic/claude-haiku-4.5']. "
+            f"Tier 0 is the model every call starts on."
+        )
+
 
 def _refuse(message: str) -> None:
     """Log the refusal, then raise it — one message, both channels.
@@ -169,8 +180,12 @@ def get_api_base_url() -> str:
     return getattr(settings, SETTING_API_BASE_URL, DEFAULT_BASE_URL)
 
 
-def get_default_model() -> str:
-    """Return ``LLM_DEFAULT_MODEL``, defaulting to ``DEFAULT_MODEL``."""
+def get_model_tiers() -> tuple:
+    """Return ``LLM_MODEL_TIERS``, cheapest first, defaulting to ``DEFAULT_MODEL_TIERS``.
+
+    Tier 0 is the default model: a call that names no tier goes there. The boot
+    check has already refused tiers a call could not use.
+    """
     from django.conf import settings
 
-    return getattr(settings, SETTING_DEFAULT_MODEL, DEFAULT_MODEL)
+    return tuple(getattr(settings, SETTING_MODEL_TIERS, DEFAULT_MODEL_TIERS))
