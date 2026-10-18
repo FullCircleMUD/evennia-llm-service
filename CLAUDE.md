@@ -22,10 +22,9 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 
 ## Project status
 
-**Stage one complete.** `LLMService.chat_completion`, the prompt loader, the settings accessors, the
-boot check and the diagnostic logging are implemented and covered — 89 cases, all green, and
-live-tested in the demo gamedir. No consumer game uses it yet — FCM's game code is being rebuilt once
-the libraries are ready, and the rebuilt game is what will consume this one.
+**Stage one complete.** `LLMService.chat_completion`, `choose_tool` and `decide`, the prompt loader, the
+settings accessors, the boot check and the diagnostic logging are implemented, covered and
+live-tested.
 
 For what each stage covers and what is decided but not built, read [docs/stages.md](docs/stages.md).
 For the running milestone log, read [docs/progress.md](docs/progress.md).
@@ -138,7 +137,7 @@ evennia-llm-service/
 │       ├── apps.py            # AppConfig — ready() runs the boot check
 │       ├── config.py          # settings, their accessors, check_settings()
 │       ├── log.py             # binds llm_service_log → llm_service.log
-│       ├── service.py         # LLMService.chat_completion
+│       ├── service.py         # LLMService: chat_completion, choose_tool, decide
 │       ├── prompt_loader.py   # loading, rendering, cache
 │       └── tests.py           # unit tests (run via runtests.py)
 └── tests/                     # standalone test settings (test_settings.py, urls.py)
