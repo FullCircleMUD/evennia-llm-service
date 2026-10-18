@@ -66,6 +66,7 @@ them patch them out to test their callers. This suite is the first coverage of t
 | `CF` | The settings accessors and the boot check |
 | `CC` | `chat_completion` |
 | `TC` | `choose_tool` — a completion that must answer by choosing one of the caller's tools |
+| `DE` | `decide` — typed questions asked of a decision model |
 | `ES` | Escalation — which model tier each attempt uses, and when a call moves up a tier |
 | `CL` | Provider client construction |
 | `PD` | The prompts folder |
@@ -133,6 +134,7 @@ handled where it is noticed — `PL-03` covers it.
 | CF-32 | `get_model_tiers()` returns the consumer's tiers, in order, when declared | `AccessorTests.test_cf_32_model_tiers_return_the_declared_tiers_in_order` |
 | CF-33 | With `LLM_ENABLED` on, `LLM_MODEL_TIERS` that is empty, not a list or tuple, or holds an entry that is not a non-blank string is refused, naming the setting — a call would have no model to go to | `CheckSettingsTests.test_cf_33_unusable_model_tiers_refuse_boot` |
 | CF-34 | That refusal logs an ERROR before it raises, carrying the same text | `CheckSettingsTests.test_cf_34_unusable_model_tiers_log_before_raising` |
+| CF-35 | `get_decisions_url()` and `get_decisions_model()` return `""` when `LLM_DECISIONS_URL` and `LLM_DECISIONS_MODEL` are undeclared, and the consumer's values when declared | `AccessorTests.test_cf_35_decisions_settings_default_empty_and_return_declared` |
 
 Retired: CF-15 and CF-16 covered `get_default_model()` and `LLM_DEFAULT_MODEL`. The default model is
 tier 0 of `LLM_MODEL_TIERS`; see `ES`.
@@ -186,6 +188,30 @@ The library knows nothing of what the tools mean.
 | TC-08 | Arguments that are not valid JSON, or not a JSON object, return `None`, logged at WARN naming the tool | `ChooseToolTests.test_tc_08_arguments_that_are_not_a_json_object_return_none` |
 | TC-09 | A response choosing several tools returns the first | `ChooseToolTests.test_tc_09_several_tools_chosen_returns_the_first` |
 | TC-10 | `ToolChoice` is exported from the package root, and cannot be changed once made | `ChooseToolTests.test_tc_10_tool_choice_is_exported_and_frozen` |
+
+## DE — `decide`
+
+`decide(state, questions, npc_key=None)`
+
+A request to a decision model rather than a chat model: one `state`, and any number of typed
+`questions` asked against it, each answered with a typed answer — a score on a rubric, one choice from
+a set, a yes-or-no probability. The request goes to `LLM_DECISIONS_URL` with `LLM_DECISIONS_MODEL`,
+under the same `LLM_API_KEY`, as a JSON body of `model`, `state` and `questions`; the answer is the
+response's `answers` map, keyed by the caller's question ids. The library knows nothing of what the
+questions mean or how each type is shaped — `questions` goes to the provider as given.
+
+Added beside `chat_completion` and `choose_tool`, which are unchanged. A consumer that never decides
+needs neither setting, so neither is checked at boot; a call with either blank is refused there and
+then. Like the other calls, every failure returns `None` with the reason in the log.
+
+| ID | Case | Test function |
+|---|---|---|
+| DE-01 | A successful call returns the response's `answers`, keyed by the caller's question ids | `DecideTests.test_de_01_returns_the_answers_by_question` |
+| DE-02 | It POSTs to `LLM_DECISIONS_URL`, with `Authorization: Bearer` and `LLM_API_KEY`, a JSON body of `model` — `LLM_DECISIONS_MODEL` — and `state` and `questions` as given | `DecideTests.test_de_02_posts_the_model_state_and_questions_with_the_key` |
+| DE-03 | With `LLM_ENABLED` false, returns `None` and sends nothing | `DecideTests.test_de_03_disabled_returns_none_and_sends_nothing` |
+| DE-04 | With `LLM_DECISIONS_URL` or `LLM_DECISIONS_MODEL` blank, returns `None` and sends nothing, logged at ERROR naming the setting | `DecideTests.test_de_04_a_blank_setting_refuses_the_call` |
+| DE-05 | An HTTP error or a failed request returns `None`, logged at ERROR with the npc key, and the status when there is one | `DecideTests.test_de_05_a_failed_request_returns_none_logged_at_error` |
+| DE-06 | A response missing an answer to any question returns `None`, logged at WARN naming the questions unanswered | `DecideTests.test_de_06_an_unanswered_question_returns_none_logged_at_warn` |
 
 ## ES — escalation
 

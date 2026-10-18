@@ -8,12 +8,14 @@ Stage one: these cover the behaviour lifted from FullCircleMUD's
 import ast
 import contextlib
 import dataclasses
+import json
 import os
 import shutil
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest import mock
+from urllib.error import HTTPError, URLError
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -423,6 +425,18 @@ class AccessorTests(SimpleTestCase):
         with override_settings(LLM_API_BASE_URL="https://example.test/v1"):
             self.assertEqual(config.get_api_base_url(), "https://example.test/v1")
 
+    def test_cf_35_decisions_settings_default_empty_and_return_declared(self):
+        """CF-35"""
+        with undeclared("LLM_DECISIONS_URL"), undeclared("LLM_DECISIONS_MODEL"):
+            self.assertEqual((config.get_decisions_url(), config.get_decisions_model()), ("", ""))
+        with override_settings(
+            LLM_DECISIONS_URL="https://example.test/decisions", LLM_DECISIONS_MODEL="decider-1"
+        ):
+            self.assertEqual(
+                (config.get_decisions_url(), config.get_decisions_model()),
+                ("https://example.test/decisions", "decider-1"),
+            )
+
     def test_cf_31_model_tiers_default_to_the_one_default_model(self):
         """CF-31"""
         self.assertUndeclared("LLM_MODEL_TIERS")
@@ -631,6 +645,123 @@ class ChooseToolTests(ServiceCase):
         self.assertIn("ToolChoice", evennia_llm_service.__all__)
         with self.assertRaises(dataclasses.FrozenInstanceError):
             ToolChoice("say", {}).name = "shout"
+
+
+# ── DE — decide ───────────────────────────────────────────────────────
+
+DECISIONS_URL = "https://provider.test/decisions"
+DECISIONS_MODEL = "decider-1"
+STATE = "Ticket: the checkout page is blank after paying."
+QUESTIONS = {
+    "urgency": {"type": "score", "instructions": "How urgent is it?", "criteria": ["low", "high"]},
+    "is_bug": {
+        "type": "noul",
+        "instructions": "Is it a defect?",
+        "criteria": {"true": "Broken behaviour.", "false": "A question."},
+    },
+}
+ANSWERS = {
+    "urgency": {"type": "score", "score": 0.9},
+    "is_bug": {"type": "noul", "noul": 0.96},
+}
+
+
+class _Answered:
+    """An HTTP response carrying ``body`` as JSON."""
+
+    def __init__(self, body):
+        self._body = json.dumps(body).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def read(self):
+        return self._body
+
+
+class FakeDecisions:
+    """Stands in for opening the request: records each one, then answers
+    with ``body`` or raises ``exc``."""
+
+    def __init__(self, body=None, exc=None):
+        self.requests = []
+        self._body = {"answers": ANSWERS} if body is None else body
+        self._exc = exc
+
+    def __call__(self, request, timeout=None):
+        self.requests.append(request)
+        if self._exc is not None:
+            raise self._exc
+        return _Answered(self._body)
+
+
+@override_settings(LLM_DECISIONS_URL=DECISIONS_URL, LLM_DECISIONS_MODEL=DECISIONS_MODEL)
+class DecideTests(ServiceCase):
+    def install(self, body=None, exc=None):
+        opened = FakeDecisions(body, exc)
+        self.enterContext(mock.patch.object(service, "urlopen", opened))
+        return opened
+
+    @staticmethod
+    def logged(log):
+        return " ".join(str(call) for call in log.call_args_list)
+
+    def test_de_01_returns_the_answers_by_question(self):
+        self.install()
+        self.assertEqual(LLMService.decide(STATE, QUESTIONS), ANSWERS)
+
+    def test_de_02_posts_the_model_state_and_questions_with_the_key(self):
+        opened = self.install()
+        LLMService.decide(STATE, QUESTIONS)
+        (request,) = opened.requests
+        self.assertEqual((request.full_url, request.get_method()), (DECISIONS_URL, "POST"))
+        self.assertEqual(request.get_header("Authorization"), f"Bearer {settings.LLM_API_KEY}")
+        self.assertEqual(
+            json.loads(request.data),
+            {"model": DECISIONS_MODEL, "state": STATE, "questions": QUESTIONS},
+        )
+
+    @override_settings(LLM_ENABLED=False)
+    def test_de_03_disabled_returns_none_and_sends_nothing(self):
+        opened = self.install()
+        self.assertIsNone(LLMService.decide(STATE, QUESTIONS))
+        self.assertEqual(opened.requests, [])
+
+    def test_de_04_a_blank_setting_refuses_the_call(self):
+        for setting in ("LLM_DECISIONS_URL", "LLM_DECISIONS_MODEL"):
+            with self.subTest(setting), override_settings(**{setting: ""}):
+                opened = self.install()
+                with mock.patch.object(service, "llm_service_log") as log:
+                    self.assertIsNone(LLMService.decide(STATE, QUESTIONS))
+                self.assertEqual(opened.requests, [])
+                self.assertIn("ERROR", self.logged(log))
+                self.assertIn(setting, self.logged(log))
+
+    def test_de_05_a_failed_request_returns_none_logged_at_error(self):
+        failures = (
+            (HTTPError(DECISIONS_URL, 429, "Too Many Requests", {}, None), "429"),
+            (URLError("connection refused"), None),
+        )
+        for exc, status in failures:
+            with self.subTest(type(exc).__name__):
+                self.install(exc=exc)
+                with mock.patch.object(service, "llm_service_log") as log:
+                    self.assertIsNone(LLMService.decide(STATE, QUESTIONS, npc_key="npc#7"))
+                logged = self.logged(log)
+                self.assertIn("ERROR", logged)
+                self.assertIn("npc#7", logged)
+                if status:
+                    self.assertIn(status, logged)
+
+    def test_de_06_an_unanswered_question_returns_none_logged_at_warn(self):
+        self.install(body={"answers": {"urgency": ANSWERS["urgency"]}})
+        with mock.patch.object(service, "llm_service_log") as log:
+            self.assertIsNone(LLMService.decide(STATE, QUESTIONS))
+        self.assertIn("WARN", self.logged(log))
+        self.assertIn("is_bug", self.logged(log))
 
 
 # ── ES — escalation ───────────────────────────────────────────────────

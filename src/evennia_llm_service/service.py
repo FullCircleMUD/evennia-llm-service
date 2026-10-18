@@ -23,10 +23,17 @@ declares nothing still runs.
 
 import json
 from dataclasses import dataclass
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from .config import (
+    DECISIONS_TIMEOUT_SECONDS,
+    SETTING_DECISIONS_MODEL,
+    SETTING_DECISIONS_URL,
     get_api_base_url,
     get_api_key,
+    get_decisions_model,
+    get_decisions_url,
     get_enabled,
     get_model_tiers,
 )
@@ -120,6 +127,71 @@ class LLMService:
             max_escalation_tier,
             accept,
         )
+
+    @classmethod
+    def decide(cls, state, questions, npc_key=None):
+        """Ask a decision model ``questions`` against ``state``.
+
+        Synchronous, like the completions: the caller wraps it in
+        ``deferToThread``. ``questions`` maps the caller's ids to typed
+        questions, sent to the provider as given; ``state`` is text or
+        JSON-able data.
+
+        Returns:
+            dict: the answers, keyed by question id, or None if disabled, not
+                configured, failed, or any question went unanswered.
+        """
+        if not get_enabled():
+            return None
+
+        url, model = get_decisions_url().strip(), get_decisions_model().strip()
+        for setting, value in ((SETTING_DECISIONS_URL, url), (SETTING_DECISIONS_MODEL, model)):
+            if not value:
+                llm_service_log(
+                    f"{setting} is not set, so no decision can be asked: npc={npc_key}",
+                    level="ERROR",
+                )
+                return None
+
+        request = Request(
+            url,
+            data=json.dumps({"model": model, "state": state, "questions": questions}).encode(),
+            headers={
+                "Authorization": f"Bearer {get_api_key()}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=DECISIONS_TIMEOUT_SECONDS) as response:
+                answers = json.loads(response.read()).get("answers")
+        except HTTPError as error:
+            llm_service_log(
+                f"decision failed: status={error.code} {error.reason} model={model} "
+                f"npc={npc_key}",
+                level="ERROR",
+            )
+            return None
+        except Exception:
+            llm_service_log(
+                f"decision failed: model={model} npc={npc_key}",
+                level="ERROR",
+                trace=True,
+            )
+            return None
+
+        # The provider answered, but not every question was. A partial set is
+        # no use to a caller that asked them together.
+        unanswered = [key for key in questions if key not in (answers or {})]
+        if unanswered:
+            llm_service_log(
+                f"decision left questions unanswered: {', '.join(unanswered)} "
+                f"model={model} npc={npc_key}",
+                level="WARN",
+            )
+            return None
+
+        return answers
 
     # ── Internal ──────────────────────────────────────────────────────
 

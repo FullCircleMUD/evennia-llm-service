@@ -73,6 +73,8 @@ Each is read with a default, so declaring none of these still starts.
 |---|---|---|
 | `LLM_ENABLED` | `True` | Master switch. False makes every call return `None` without contacting the provider, and neither the key nor the endpoint is needed. |
 | `LLM_MODEL_TIERS` | `("openai/gpt-4o-mini",)` | The models a call can use, cheapest first. Tier 0 is where every call starts; a call escalates only as far as its `max_escalation_tier`. Refused at boot, while enabled, if empty or holding anything but model names. |
+| `LLM_DECISIONS_URL` | `""` | Where `decide` sends its questions, e.g. `"https://openrouter.ai/api/alpha/decisions"`. Needed only if you call `decide`; a call with it blank returns `None` and logs an ERROR naming it. Sent under `LLM_API_KEY`. |
+| `LLM_DECISIONS_MODEL` | `""` | The decision model `decide` asks, e.g. `"~typesafe/jev-latest"`. Needed, and refused when blank, as `LLM_DECISIONS_URL` is. |
 
 ### Spending and rate limits
 

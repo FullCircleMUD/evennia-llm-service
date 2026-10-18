@@ -47,6 +47,17 @@ escalation). An empty answer, or one the caller's `accept(answer)` rejects, send
 tier up. Escalation is per call because cost is: high-volume calls stay on tier 0, and a rare one can
 pay to climb. The cases are `ES` in [test-plan.md](test-plan.md).
 
+## Decisions (built)
+
+`LLMService.decide` sits beside the two completions, which are unchanged. It asks a decision model typed
+questions against one state — a score on a rubric, one choice from a set, a yes or no — and answers
+with the response's `answers`, keyed by the caller's question ids. `questions` goes to the provider as
+given, so the library knows nothing of each type's shape or what the questions mean. It POSTs to
+`LLM_DECISIONS_URL` with `LLM_DECISIONS_MODEL`, under the same `LLM_API_KEY`; neither setting is
+checked at boot, since a consumer that never decides needs neither. It follows the completions'
+contract: `None` on any failure, with the reason in the log. The cases are `DE` in
+[test-plan.md](test-plan.md).
+
 ## Stage two — the mixin
 
 The library gains the thin mixin a game's NPC sits on. FCM's `LLMMixin` is the source material and

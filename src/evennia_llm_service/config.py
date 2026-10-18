@@ -30,6 +30,8 @@ SETTING_ENABLED = "LLM_ENABLED"
 SETTING_API_KEY = "LLM_API_KEY"
 SETTING_API_BASE_URL = "LLM_API_BASE_URL"
 SETTING_MODEL_TIERS = "LLM_MODEL_TIERS"
+SETTING_DECISIONS_URL = "LLM_DECISIONS_URL"
+SETTING_DECISIONS_MODEL = "LLM_DECISIONS_MODEL"
 
 #: Used when the consumer declares no tiers: one, which every call goes to.
 DEFAULT_MODEL_TIERS = ("openai/gpt-4o-mini",)
@@ -49,6 +51,16 @@ DEFAULT_API_KEY = ""
 
 #: The library runs unless the consumer turns it off.
 DEFAULT_ENABLED = True
+
+#: Where decisions are asked, and of which model. Blank for the same reason as
+#: the base URL: which provider gets the traffic is the consumer's choice. Not
+#: checked at boot, since a consumer that never decides needs neither; a call
+#: with either blank is refused when it is made.
+DEFAULT_DECISIONS_URL = ""
+DEFAULT_DECISIONS_MODEL = ""
+
+#: How long a decision request may take before it counts as failed.
+DECISIONS_TIMEOUT_SECONDS = 30
 
 
 def check_settings() -> None:
@@ -178,6 +190,20 @@ def get_api_base_url() -> str:
     from django.conf import settings
 
     return getattr(settings, SETTING_API_BASE_URL, DEFAULT_BASE_URL)
+
+
+def get_decisions_url() -> str:
+    """Return ``LLM_DECISIONS_URL``, defaulting to ``DEFAULT_DECISIONS_URL``."""
+    from django.conf import settings
+
+    return getattr(settings, SETTING_DECISIONS_URL, DEFAULT_DECISIONS_URL)
+
+
+def get_decisions_model() -> str:
+    """Return ``LLM_DECISIONS_MODEL``, defaulting to ``DEFAULT_DECISIONS_MODEL``."""
+    from django.conf import settings
+
+    return getattr(settings, SETTING_DECISIONS_MODEL, DEFAULT_DECISIONS_MODEL)
 
 
 def get_model_tiers() -> tuple:
